@@ -6,7 +6,7 @@
 set -eu
 
 version="${1:-}"
-repo="${2:-${GITHUB_REPOSITORY:-newiqllc/mintrix-installer}}"
+repo="${2:-${GITHUB_REPOSITORY:-MomoDeLuxe/mintrix-installer}}"
 printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$' \
     || { echo "Usage: $0 MAJOR.MINOR.PATCH[-beta.N] [OWNER/REPO]" >&2; exit 1; }
 

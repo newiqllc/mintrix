@@ -7,7 +7,7 @@ Mintrix is the management panel for the Ministra TV platform. This repository bu
 On a Linux server (x86-64, 2 GB RAM or more) with Ubuntu, Debian, RHEL, AlmaLinux, Rocky Linux or Fedora:
 
 ```sh
-wget https://github.com/newiqllc/mintrix-installer/releases/latest/download/install.sh
+wget https://github.com/MomoDeLuxe/mintrix-installer/releases/latest/download/install.sh
 sudo sh install.sh
 ```
 
