@@ -1,0 +1,69 @@
+# Publishes install.sh for a Mintrix version as a release of this repository:
+#
+#   https://github.com/<this repo>/releases/latest/download/install.sh
+#
+# Started by the Mintrix release workflow (repository_dispatch "mintrix-release" with
+# client_payload.version) once its images are pushed, or by hand from the Actions tab.
+name: Release installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Mintrix version whose images are published, e.g. 0.1.0 or 0.1.0-beta.6
+        required: true
+  repository_dispatch:
+    types: [mintrix-release]
+  pull_request:
+
+concurrency:
+  group: installer-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release
+    env:
+      # Pull requests build with a placeholder version and publish nothing
+      VERSION: ${{ inputs.version || github.event.client_payload.version || '0.0.0-rc.0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: sh build.sh "$VERSION"
+
+      - name: Check
+        run: |
+          shellcheck -s sh build.sh dist/install.sh
+          sh dist/install.sh --help >/dev/null
+          # The Compose file the installer writes is valid with the settings it fills in
+          printf 'APP_KEY=base64:x\nDB_PASSWORD=x\nDB_ROOT_PASSWORD=x\nMINTRIX_VERSION=%s\n' "$VERSION" > "$RUNNER_TEMP/env"
+          docker compose -f src/compose.yaml --env-file "$RUNNER_TEMP/env" config --quiet
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+              echo "::error::$tag is released already. Releases are never moved; use the next number."
+              exit 1
+          fi
+          # releases/latest skips prereleases: betas count as latest until the first final release
+          finals=$(gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -Ec '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          case "$VERSION" in
+              *-*) [ "$finals" -gt 0 ] && flags=--prerelease || flags=--latest ;;
+              *) flags=--latest ;;
+          esac
+          gh release create "$tag" dist/install.sh --target "$GITHUB_SHA" $flags \
+            --title "Mintrix $VERSION" \
+            --notes "Install on a Linux server (x86-64):
+
+          \`\`\`sh
+          wget https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh
+          sudo sh install.sh
+          \`\`\`
+
+          Update an installation to this version: \`mintrix-update --version $VERSION\`"

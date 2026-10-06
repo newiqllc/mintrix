@@ -1,0 +1,109 @@
+# Mintrix, run from the released images.
+# Written by install.sh, replaced on every update: change settings in .env instead.
+name: mintrix
+
+# Shared by the app and its queue worker and scheduler: same image, same settings
+x-mintrix: &mintrix
+  image: ${MINTRIX_IMAGE:-ghcr.io/momodeluxe/mintrix}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env (install.sh does this)}
+  # The images are built for x86-64 servers (Apple Silicon runs them emulated)
+  platform: linux/amd64
+  environment:
+    APP_NAME: Mintrix
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_KEY: ${APP_KEY:?set APP_KEY in .env (install.sh does this)}
+    APP_URL: ${APP_URL:-http://localhost:8000}
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: ${LOG_LEVEL:-warning}
+    DB_CONNECTION: mysql
+    DB_HOST: mysql
+    DB_PORT: 3306
+    DB_DATABASE: ${DB_DATABASE:-mintrix}
+    DB_USERNAME: ${DB_USERNAME:-mintrix}
+    DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    SESSION_DRIVER: database
+    CACHE_STORE: database
+    QUEUE_CONNECTION: database
+    FILESYSTEM_DISK: local
+    MAIL_MAILER: ${MAIL_MAILER:-smtp}
+    MAIL_HOST: ${MAIL_HOST:-}
+    MAIL_PORT: ${MAIL_PORT:-587}
+    MAIL_USERNAME: ${MAIL_USERNAME:-}
+    MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+    MAIL_SCHEME: ${MAIL_SCHEME:-}
+    MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-mintrix@localhost}
+    MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Mintrix}
+    IP_WHITELIST: ${IP_WHITELIST:-}
+    MINTRIX_LICENSE_KEY: ${MINTRIX_LICENSE_KEY:-}
+    # nginx below talks to the app; client addresses reach Laravel through it
+    TRUSTED_PROXIES: nginx
+  volumes:
+    # Logs, backups (storage/app/private/backups) and Laravel's working files
+    - storage:/var/www/mintrix/storage
+  extra_hosts:
+    # Lets Mintrix reach a Ministra running on this same machine as http://host.docker.internal
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
+services:
+  nginx:
+    image: ${MINTRIX_WEB_IMAGE:-ghcr.io/momodeluxe/mintrix-web}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env}
+    platform: linux/amd64
+    ports:
+      # 127.0.0.1 = only a reverse proxy on this machine can reach it (recommended)
+      - "${MINTRIX_HTTP_BIND:-127.0.0.1}:${MINTRIX_HTTP_PORT:-8000}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Migrates the database on start, then serves PHP for nginx
+  app:
+    <<: *mintrix
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/mintrix-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 300s
+
+  queue:
+    <<: *mintrix
+    command: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90", "--sleep=3"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Ministra heartbeat every minute, scheduled backups
+  scheduler:
+    <<: *mintrix
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-mintrix}
+      MYSQL_USER: ${DB_USERNAME:-mintrix}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+    # No host port: only reachable from the other containers
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql_backups:/backups:rw
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  storage:

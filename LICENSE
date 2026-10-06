@@ -1,0 +1,23 @@
+TODO: REPLACE THIS FILE WITH YOUR LICENCE TERMS BEFORE PUBLISHING.
+It is a placeholder outline, not legal text; have the final wording reviewed.
+
+Copyright (c) 2026 Mohamed El Mahdy. All rights reserved.
+
+Mintrix (the "Software"), distributed as the Docker images this repository
+installs, is proprietary.
+
+Points your terms should cover:
+- Who may install and use the Software, and on how many servers
+- That copying, redistributing, decoding, decompiling or reverse engineering
+  the Software is not permitted
+- Whether a licence key or licence file is required, and what happens when
+  it expires
+- Warranty disclaimer and limitation of liability
+- Governing law
+
+Third-party software in the images, under their own licences:
+Debian, PHP, nginx, MySQL, Laravel and the bundled Composer packages, Vue and
+the bundled npm packages.
+
+The files in this repository (compose.yaml, .env.example, scripts/, README.md)
+may be used and modified to install and run the Software.
