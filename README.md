@@ -66,3 +66,8 @@ sh build.sh 0.1.0
 ```
 
 To test an installer against images loaded on the machine instead of downloaded, set `MINTRIX_SKIP_PULL=1`.
+
+
+
+Possible gap
+NodeState::refreshNodeFile() says it runs from install.sh and update.sh. This installer doesn't call it: the only artisan command it runs is mintrix:create-admin (src/install.sh:229). That leaves node.dat to the hourly scheduler, so a fresh install may run for up to an hour without it. If the release images are ionCube-encoded and need that file to run, the first start or create-admin could fail. I can add a mintrix:status --sync step to the installer before the admin is created, if you want.
