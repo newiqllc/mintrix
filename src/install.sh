@@ -32,9 +32,9 @@ Usage: sudo sh install.sh [options]
   --dir DIR           Installation folder (default: /opt/mintrix)
   --license KEY       License key, from your client area
   --domain DOMAIN     Domain the license is for, where users open Mintrix (not an IP)
-  --http              Serve plain HTTP on the web port, without a reverse proxy
-                      (default: HTTPS through a reverse proxy on this server)
-  --port PORT         Web port (default: 8000 behind a reverse proxy, 80 with --http)
+  --port PORT         Port Mintrix listens on, open to the network (default: 80)
+  --http              Users open http://DOMAIN (default: https://DOMAIN, with HTTPS
+                      from Cloudflare or another proxy in front)
   --yes               Ask nothing; use the options above and the defaults
 
 The license key and domain are checked with the license server on every run, before
@@ -248,27 +248,22 @@ echo "License accepted for $domain."
 
 # ---------------------------------------------------------------- address
 
-# A new installation chooses how it is served (also one whose first run stopped before
-# this, still at the template's localhost address); an existing one keeps its scheme and
-# port and only takes the new domain
+# Mintrix listens on one port, open to the network. HTTPS, when used, comes from in front
+# of it (Cloudflare, or another proxy): it only decides the address. A new installation
+# asks (also one whose first run stopped before this, still at the template's localhost
+# address); an existing one keeps its address and only takes a new domain, or --port.
 if [ "$fresh" = true ] || [ "$(url_host "$(get_env APP_URL)")" = localhost ]; then
-    [ -n "$https" ] || ask https "Serve over HTTPS through a reverse proxy on this server? (y/n)" y
+    ask port "Port Mintrix listens on" "${port:-80}"
+    [ -n "$https" ] || ask https "Do users open it over HTTPS (Cloudflare or another proxy in front)? (y/n)" y
     case "$https" in
         n|N|no|No)
-            ask port "Web port" "${port:-80}"
-            bind=0.0.0.0
             app_url="http://$domain"
             [ "$port" = 80 ] || app_url="$app_url:$port"
             ;;
-        *)
-            # Reachable only from this machine: the reverse proxy serves HTTPS
-            ask port "Port the reverse proxy forwards to" "${port:-8000}"
-            bind=127.0.0.1
-            app_url="https://$domain"
-            ;;
+        *) app_url="https://$domain" ;;
     esac
     set_env APP_URL "$app_url"
-    set_env MINTRIX_HTTP_BIND "$bind"
+    set_env MINTRIX_HTTP_BIND 0.0.0.0
     set_env MINTRIX_HTTP_PORT "$port"
 else
     app_url=$(get_env APP_URL)
@@ -276,6 +271,11 @@ else
         app_url=$(printf '%s' "$app_url" | sed -E "s#^([A-Za-z][A-Za-z0-9+.-]*://)([^/?\#@]*@)?[^:/?\#]+#\1$domain#")
         set_env APP_URL "$app_url"
         echo "Address changed to $app_url"
+    fi
+    if [ -n "$port" ]; then
+        set_env MINTRIX_HTTP_BIND 0.0.0.0
+        set_env MINTRIX_HTTP_PORT "$port"
+        echo "Listening on port $port"
     fi
 fi
 
@@ -374,8 +374,8 @@ Mintrix $VERSION is installed.
 
 EOF
     case "$url" in
-        https://*) echo "Point your reverse proxy (HTTPS) at http://127.0.0.1:$(get_env MINTRIX_HTTP_PORT)." ;;
-        *) echo "Mintrix is reachable without HTTPS. For use over the internet, set up a domain with HTTPS (see README)." ;;
+        https://*) echo "Mintrix listens on port $(get_env MINTRIX_HTTP_PORT) without HTTPS: put Cloudflare (SSL/TLS mode Flexible) or another HTTPS proxy in front of it." ;;
+        *) echo "Mintrix is reachable without HTTPS. For use over the internet, put Cloudflare or another HTTPS proxy in front (see README)." ;;
     esac
 else
     echo

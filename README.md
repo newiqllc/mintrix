@@ -16,7 +16,7 @@ The script:
 1. installs Docker Engine and the Compose plugin when they are missing;
 2. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
 3. asks for your license key and the domain it is for (on every run; the saved ones are the defaults) and checks them with the license server: only an active license for that domain is accepted and saved. A new license is tied to the domain on this first check. The answer is the login for the download, logged out again afterwards;
-4. on a new installation, asks whether Mintrix is served over HTTPS through a reverse proxy, and the port;
+4. on a new installation, asks for the port Mintrix listens on (default 80) and whether users open it over HTTPS;
 5. downloads and starts Mintrix and its database;
 6. fetches the license file for your license and domain (`/opt/mintrix/runtime/node.dat`);
 7. creates the first administrator, `administrator` with the password `password`.
@@ -26,8 +26,8 @@ The script:
 Without questions, for example from automation:
 
 ```sh
-sudo sh install.sh --yes --license <key> --domain tv.example.com            # HTTPS through a reverse proxy
-sudo sh install.sh --yes --license <key> --domain tv.example.com --http     # plain HTTP on port 80
+sudo sh install.sh --yes --license <key> --domain tv.example.com            # https://, Cloudflare in front
+sudo sh install.sh --yes --license <key> --domain tv.example.com --http     # plain http://
 ```
 
 A key and domain the license server refuses are asked for again, with the reason; with `--yes` the script stops and says why. No other login is needed.
@@ -38,8 +38,12 @@ A key and domain the license server refuses are asked for again, with the reason
 
 Mintrix needs a domain name (e.g. `tv.example.com`), not an IP address: the license and its license file are locked to it. Point the domain's DNS at the server; the script only warns when it does not yet.
 
-- **HTTPS (default):** Mintrix is reachable only from the server itself, at `https://<domain>` behind a reverse proxy with HTTPS on that server (Caddy, nginx). Point the proxy at `http://127.0.0.1:8000`.
-- **`--http`:** Mintrix serves `http://<domain>` on port 80 (or `--port`) to the network. Fine for trying it out, but logins and customer data then travel unencrypted.
+Mintrix listens on one port (default 80, `--port` to change it) with plain HTTP, open to the network. It does not handle certificates itself:
+
+- **HTTPS (default):** users open `https://<domain>`, and Cloudflare (or another proxy) in front provides HTTPS. In Cloudflare, proxy the record (orange cloud) and set SSL/TLS to **Flexible** for this hostname, since the server speaks plain HTTP.
+- **`--http`:** users open `http://<domain>` directly. Fine for trying it out, but logins and customer data then travel unencrypted.
+
+To change the port later: `mintrix-update --port <port>`.
 
 To move to another domain, reissue the license in your client area, then run `mintrix-update` and enter the new domain. Ministra and new streaming servers (Servers > Install Server) call Mintrix at its address: they must be able to reach it.
 
