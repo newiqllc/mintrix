@@ -29,7 +29,7 @@ Without questions, for example from automation:
 sudo sh install.sh --yes --url https://mintrix.example.com --license <key>
 ```
 
-When the license server cannot give a login, the script asks for one. Without questions, set it beforehand: `export MINTRIX_REGISTRY_USER=<user> MINTRIX_REGISTRY_TOKEN=<token>` and run with `sudo -E`.
+When the license server cannot give a login, the script asks for one; with `--yes` it stops and says why.
 
 `sh install.sh --help` lists all options.
 

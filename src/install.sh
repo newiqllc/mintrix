@@ -36,7 +36,6 @@ Usage: sudo sh install.sh [options]
   --yes               Ask nothing; use the options above and the defaults
 
 The images are pulled with a login the license server gives for an active license key.
-Another login instead: set MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN.
 EOF
 }
 
@@ -236,15 +235,12 @@ license_login() {
 
 registry_logout() { docker logout "$registry" >/dev/null 2>&1 || true; }
 
-# Logs in for the pull: MINTRIX_REGISTRY_USER/TOKEN when set, else the license server's
-# login, else one typed in
+# Logs in for the pull with the license server's login, else one typed in
 registry_login() {
-    if [ -n "${MINTRIX_REGISTRY_TOKEN:-}" ]; then
-        registry=$REGISTRY user="${MINTRIX_REGISTRY_USER:-}" token=$MINTRIX_REGISTRY_TOKEN
-    elif ! license_login; then
-        interactive || fail "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env, or log in with MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN."
+    if ! license_login; then
+        interactive || fail "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env and run this again."
         echo "Log in to the registry instead (the GitHub login you were given with your license)."
-        registry=$REGISTRY user="${MINTRIX_REGISTRY_USER:-}"
+        registry=$REGISTRY user=
         ask user "GitHub user name" "$user"
         ask_secret token "Token"
     fi
