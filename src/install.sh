@@ -14,7 +14,7 @@ VERSION="@@VERSION@@"
 REPO="@@REPO@@"
 REGISTRY=ghcr.io
 # Gives installations with an active license key the registry login for the images
-LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://cms.newiq.pl}"
+LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://license.newiq.pl}"
 
 dir=/opt/mintrix
 app_url=
@@ -215,7 +215,7 @@ license_login() {
     printf '%s' "$domain" | grep -Eq '^[a-z0-9.-]+$' || { echo "APP_URL in $dir/.env has no usable domain."; return 1; }
 
     answer=$(mktemp)
-    url="${LICENSE_SERVER%/}/modules/addons/mintrix_licensefile/registry.php"
+    url="${LICENSE_SERVER%/}/registry.php"
     # Over IPv4: the license is bound to this server's IPv4 address
     if command -v curl >/dev/null 2>&1; then
         curl -4 -sS --max-time 30 -o "$answer" --data "licensekey=$key&domain=$domain" "$url" || true
