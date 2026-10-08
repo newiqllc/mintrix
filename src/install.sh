@@ -13,6 +13,8 @@ set -eu
 VERSION="@@VERSION@@"
 REPO="@@REPO@@"
 REGISTRY=ghcr.io
+# Gives installations with an active license key the registry login for the images
+LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://cms.newiq.pl}"
 
 dir=/opt/mintrix
 app_url=
@@ -33,7 +35,8 @@ Usage: sudo sh install.sh [options]
   --port PORT         Web port (default: 8000)
   --yes               Ask nothing; use the options above and the defaults
 
-Registry login without questions: set MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN.
+The images are pulled with a login the license server gives for an active license key.
+Another login instead: set MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN.
 EOF
 }
 
@@ -194,17 +197,62 @@ fi
 
 # ---------------------------------------------------------------- images
 
+# The host of APP_URL: the domain the license is bound to, as Mintrix itself sends it
+license_domain() {
+    get_env APP_URL | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#[/?\#].*##' -e 's#^.*@##' -e 's#:[0-9]*$##' \
+        | tr 'A-Z' 'a-z'
+}
+
+# A string field of the license server's flat JSON answer
+json_field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" "$2"; }
+
+# Sets registry, user and token from the license server, for the license key and domain
+# in .env; says why not otherwise
+license_login() {
+    key=$(get_env MINTRIX_LICENSE_KEY)
+    domain=$(license_domain)
+    [ -n "$key" ] || { echo "No license key in $dir/.env (MINTRIX_LICENSE_KEY)."; return 1; }
+    printf '%s' "$key" | grep -Eq '^[A-Za-z0-9-]+$' || { echo "The license key in $dir/.env is not valid."; return 1; }
+    printf '%s' "$domain" | grep -Eq '^[a-z0-9.-]+$' || { echo "APP_URL in $dir/.env has no usable domain."; return 1; }
+
+    answer=$(mktemp)
+    url="${LICENSE_SERVER%/}/modules/addons/mintrix_licensefile/registry.php"
+    # Over IPv4: the license is bound to this server's IPv4 address
+    if command -v curl >/dev/null 2>&1; then
+        curl -4 -sS --max-time 30 -o "$answer" --data "licensekey=$key&domain=$domain" "$url" || true
+    else
+        wget -4 -q --content-on-error -T 30 -O "$answer" --post-data "licensekey=$key&domain=$domain" "$url" || true
+    fi
+    registry=$(json_field registry "$answer")
+    user=$(json_field user "$answer")
+    token=$(json_field token "$answer")
+    error=$(json_field error "$answer")
+    rm -f "$answer"
+
+    [ -n "$registry" ] && [ -n "$user" ] && [ -n "$token" ] && return 0
+    echo "The license server gave no registry login for $domain: ${error:-it could not be reached ($LICENSE_SERVER)}"
+    return 1
+}
+
+registry_logout() { docker logout "$registry" >/dev/null 2>&1 || true; }
+
+# Logs in for the pull: MINTRIX_REGISTRY_USER/TOKEN when set, else the license server's
+# login, else one typed in
 registry_login() {
-    user="${MINTRIX_REGISTRY_USER:-}"
-    token="${MINTRIX_REGISTRY_TOKEN:-}"
-    if [ -z "$token" ]; then
-        interactive || return 1
-        echo "The Mintrix images need a registry login (the token you were given with your license)."
+    if [ -n "${MINTRIX_REGISTRY_TOKEN:-}" ]; then
+        registry=$REGISTRY user="${MINTRIX_REGISTRY_USER:-}" token=$MINTRIX_REGISTRY_TOKEN
+    elif ! license_login; then
+        interactive || fail "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env, or log in with MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN."
+        echo "Log in to the registry instead (the GitHub login you were given with your license)."
+        registry=$REGISTRY user="${MINTRIX_REGISTRY_USER:-}"
         ask user "GitHub user name" "$user"
         ask_secret token "Token"
     fi
-    [ -n "$user" ] && [ -n "$token" ] || return 1
-    printf '%s' "$token" | docker login "$REGISTRY" -u "$user" --password-stdin >/dev/null
+    [ -n "$user" ] && [ -n "$token" ] || fail "No registry login."
+    # The login only lasts for the pull, so the token is not left in Docker's config
+    trap registry_logout EXIT
+    printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >/dev/null \
+        || fail "$registry refused the login."
 }
 
 say "Downloading Mintrix $VERSION"
@@ -212,10 +260,12 @@ say "Downloading Mintrix $VERSION"
 # MINTRIX_SKIP_PULL=1 is only for testing images loaded on this machine.
 if [ "${MINTRIX_SKIP_PULL:-}" = 1 ]; then
     echo "Skipped (MINTRIX_SKIP_PULL=1)"
-elif ! MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql 2>/dev/null; then
-    registry_login || fail "Could not download the images. Check the version, or log in with MINTRIX_REGISTRY_USER and MINTRIX_REGISTRY_TOKEN."
+else
+    registry_login
     MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql \
-        || fail "Could not download Mintrix $VERSION with that login."
+        || fail "Could not download Mintrix $VERSION. Check the version: https://github.com/$REPO/releases"
+    registry_logout
+    trap - EXIT
 fi
 
 if compose ps --status running --services 2>/dev/null | grep -qx mysql; then

@@ -16,7 +16,7 @@ The script:
 1. installs Docker Engine and the Compose plugin when they are missing;
 2. asks for the web port, the address users open Mintrix at, and your license key;
 3. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
-4. asks for the registry login you were given with your license, if the server needs one;
+4. gets a registry login for your license key from the license server (only for an active license, for the domain it is bound to), and logs out again after the download;
 5. downloads and starts Mintrix and its database;
 6. fetches the license file for your license key and address (`/opt/mintrix/runtime/node.dat`);
 7. creates the first administrator, `administrator` with the password `password`.
@@ -26,9 +26,10 @@ The script:
 Without questions, for example from automation:
 
 ```sh
-export MINTRIX_REGISTRY_USER=<user> MINTRIX_REGISTRY_TOKEN=<token>
-sudo -E sh install.sh --yes --url https://mintrix.example.com --license <key>
+sudo sh install.sh --yes --url https://mintrix.example.com --license <key>
 ```
+
+When the license server cannot give a login, the script asks for one. Without questions, set it beforehand: `export MINTRIX_REGISTRY_USER=<user> MINTRIX_REGISTRY_TOKEN=<token>` and run with `sudo -E`.
 
 `sh install.sh --help` lists all options.
 
