@@ -7,7 +7,7 @@ Mintrix is the management panel for the Ministra TV platform. This repository bu
 On a Linux server (x86-64, 2 GB RAM or more) with Ubuntu, Debian, RHEL, AlmaLinux, Rocky Linux or Fedora:
 
 ```sh
-wget https://github.com/MomoDeLuxe/mintrix-installer/releases/latest/download/install.sh
+wget https://github.com/newiqllc/mintrix-installer/releases/latest/download/install.sh
 sudo sh install.sh
 ```
 
@@ -18,7 +18,8 @@ The script:
 3. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
 4. asks for the registry login you were given with your license, if the server needs one;
 5. downloads and starts Mintrix and its database;
-6. creates the first administrator, `administrator` with the password `password`.
+6. fetches the license file for your license key and address (`/opt/mintrix/runtime/node.dat`);
+7. creates the first administrator, `administrator` with the password `password`.
 
 **Sign in and change that password and the account's email right away**: anyone who can reach the panel can try the default.
 
@@ -36,6 +37,8 @@ sudo -E sh install.sh --yes --url https://mintrix.example.com --license <key>
 - An `http://` address makes Mintrix reachable on that port from the network. This is fine for trying it out, but logins and customer data then travel unencrypted.
 - An `https://` address keeps Mintrix reachable only from the server itself, behind a reverse proxy with HTTPS on that server (Caddy, nginx). Point the proxy at `http://127.0.0.1:8000`.
 
+The license is tied to the domain of this address, so set the final one before adding the license key. Ministra and new streaming servers (Servers > Install Server) call Mintrix at this address: they must be able to reach it.
+
 ## Update
 
 ```sh
@@ -47,7 +50,7 @@ An update backs up the database to `/opt/mintrix/mysql_backups/` first, keeps `.
 
 ## Settings
 
-The settings are in `/opt/mintrix/.env`, and the comments there explain each one. After a change, apply it with `sudo mintrix-update --version <running version>`. Keep `.env` private and back it up with your database: a backup is only usable with the same `APP_KEY`.
+The settings are in `/opt/mintrix/.env`, and the comments there explain each one. After a change, apply it with `sudo mintrix-update --version <running version>`; this also fetches the license file after you add or change `MINTRIX_LICENSE_KEY`. Keep `.env` private and back it up with your database: a backup is only usable with the same `APP_KEY`.
 
 ## Administrator accounts
 
@@ -67,7 +70,3 @@ sh build.sh 0.1.0
 
 To test an installer against images loaded on the machine instead of downloaded, set `MINTRIX_SKIP_PULL=1`.
 
-
-
-Possible gap
-NodeState::refreshNodeFile() says it runs from install.sh and update.sh. This installer doesn't call it: the only artisan command it runs is mintrix:create-admin (src/install.sh:229). That leaves node.dat to the hourly scheduler, so a fresh install may run for up to an hour without it. If the release images are ionCube-encoded and need that file to run, the first start or create-admin could fail. I can add a mintrix:status --sync step to the installer before the admin is created, if you want.
