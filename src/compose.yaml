@@ -4,7 +4,7 @@ name: mintrix
 
 # Shared by the app and its queue worker and scheduler: same image, same settings
 x-mintrix: &mintrix
-  image: ${MINTRIX_IMAGE:-ghcr.io/momodeluxe/mintrix}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env (install.sh does this)}
+  image: ${MINTRIX_IMAGE:-ghcr.io/newiqllc/mintrix}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env (install.sh does this)}
   # The images are built for x86-64 servers (Apple Silicon runs them emulated)
   platform: linux/amd64
   environment:
@@ -40,6 +40,9 @@ x-mintrix: &mintrix
   volumes:
     # Logs, backups (storage/app/private/backups) and Laravel's working files
     - storage:/var/www/mintrix/storage
+    # The license file (node.dat) the encoded code needs: fetched by install.sh, renewed
+    # by the app, shared by all three roles and kept across updates
+    - ./runtime:/var/www/mintrix/runtime
   extra_hosts:
     # Lets Mintrix reach a Ministra running on this same machine as http://host.docker.internal
     - "host.docker.internal:host-gateway"
@@ -47,7 +50,7 @@ x-mintrix: &mintrix
 
 services:
   nginx:
-    image: ${MINTRIX_WEB_IMAGE:-ghcr.io/momodeluxe/mintrix-web}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env}
+    image: ${MINTRIX_WEB_IMAGE:-ghcr.io/newiqllc/mintrix-web}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env}
     platform: linux/amd64
     ports:
       # 127.0.0.1 = only a reverse proxy on this machine can reach it (recommended)

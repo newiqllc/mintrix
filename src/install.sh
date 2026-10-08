@@ -144,7 +144,7 @@ docker info >/dev/null 2>&1 || fail "Docker is installed but not running. Start 
 
 # ---------------------------------------------------------------- files
 
-mkdir -p "$dir/mysql_backups"
+mkdir -p "$dir/mysql_backups" "$dir/runtime"
 chmod 700 "$dir"
 
 # compose.yaml belongs to the installer and is replaced on every run
@@ -156,6 +156,13 @@ if [ -f "$dir/.env" ]; then
     fresh=false
     previous=$(get_env MINTRIX_VERSION)
     say "Updating Mintrix in $dir${previous:+ from $previous} to $VERSION (settings in .env are kept)"
+    # The images moved from the momodeluxe to the newiqllc registry: new versions are only there
+    for key in MINTRIX_IMAGE MINTRIX_WEB_IMAGE; do
+        image=$(get_env "$key")
+        case "$image" in
+            ghcr.io/momodeluxe/*) set_env "$key" "ghcr.io/newiqllc/${image#ghcr.io/momodeluxe/}" ;;
+        esac
+    done
 else
     fresh=true
     previous=
@@ -225,8 +232,21 @@ say "Starting Mintrix (the first start and database updates can take a few minut
 compose up -d --remove-orphans --wait --wait-timeout 600 \
     || fail "Mintrix did not become ready. See: cd $dir && docker compose logs --tail=100 app"
 
+# The licensed features run only with the license file runtime/node.dat, issued for the
+# license key and the domain of APP_URL. Fetched now rather than by the hourly scheduler.
+say "Checking the license"
+if compose exec -T app setpriv --reuid=www-data --regid=www-data --init-groups php artisan mintrix:status --sync; then
+    # The queue worker and scheduler may have started before the file was there
+    compose restart queue scheduler >/dev/null
+else
+    echo "The license file could not be fetched; the licensed features stay off until it is."
+    echo "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env, then run: mintrix-update --version $VERSION"
+fi
+
 # Only while no administrator exists: running this again never resets a password
+sign_in="administrator / password   (change the password and email right away)"
 if ! compose exec -T app php artisan mintrix:create-admin --default; then
+    sign_in="with an administrator from: cd $dir && docker compose exec app php artisan mintrix:create-admin"
     echo "No default administrator created. Create one with: cd $dir && docker compose exec app php artisan mintrix:create-admin"
 fi
 
@@ -254,7 +274,7 @@ if [ "$fresh" = true ]; then
 Mintrix $VERSION is installed.
 
   Open:      ${url%/}/app/
-  Sign in:   administrator / password   (change the password and email right away)
+  Sign in:   $sign_in
   Settings:  $dir/.env   (after a change, run: mintrix-update --version $VERSION)
   Update:    mintrix-update
 
