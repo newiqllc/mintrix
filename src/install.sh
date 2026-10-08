@@ -173,7 +173,7 @@ else
     ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     ask port "Web port" "${port:-8000}"
     ask app_url "Address users open Mintrix at" "${app_url:-http://${ip:-127.0.0.1}:$port}"
-    ask license_key "License key (empty: add it later in $dir/.env)" "$license_key"
+    ask license_key "License key (from your client area)" "$license_key"
 
     case "$app_url" in
         # Behind a reverse proxy with HTTPS on this machine: not reachable from outside
@@ -193,6 +193,15 @@ MINTRIX_ENV_EOF
     set_env MINTRIX_HTTP_BIND "$bind"
     set_env MINTRIX_HTTP_PORT "$port"
 fi
+
+# The license key gets the registry login for the images, so it is needed before the
+# download. --license also sets it on an update (e.g. a new key after a reissue).
+[ -z "$license_key" ] || set_env MINTRIX_LICENSE_KEY "$license_key"
+while [ -z "$(get_env MINTRIX_LICENSE_KEY)" ]; do
+    interactive || fail "Mintrix needs a license key: run again with --license KEY (from your client area)."
+    ask license_key "License key (from your client area)" ""
+    [ -z "$license_key" ] || set_env MINTRIX_LICENSE_KEY "$license_key"
+done
 
 # ---------------------------------------------------------------- images
 
