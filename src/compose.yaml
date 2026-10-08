@@ -52,6 +52,9 @@ services:
   nginx:
     image: ${MINTRIX_WEB_IMAGE:-ghcr.io/newiqllc/mintrix-web}:${MINTRIX_VERSION:?set MINTRIX_VERSION in .env}
     platform: linux/amd64
+    environment:
+      # Passed to PHP as SERVER_NAME: the licensed code checks its license file against it
+      MINTRIX_DOMAIN: ${MINTRIX_DOMAIN:-}
     ports:
       # 127.0.0.1 = only a reverse proxy on this machine can reach it (recommended)
       - "${MINTRIX_HTTP_BIND:-127.0.0.1}:${MINTRIX_HTTP_PORT:-8000}:80"

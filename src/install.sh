@@ -16,9 +16,10 @@ REPO="@@REPO@@"
 LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://license.newiq.pl}"
 
 dir=/opt/mintrix
-app_url=
+domain=
 license_key=
 port=
+https=
 assume_yes=false
 
 usage() {
@@ -29,12 +30,15 @@ Usage: sudo sh install.sh [options]
 
   --version VERSION   Install this version instead of $VERSION
   --dir DIR           Installation folder (default: /opt/mintrix)
-  --url URL           Address users open Mintrix at, e.g. https://mintrix.example.com
   --license KEY       License key, from your client area
-  --port PORT         Web port (default: 8000)
+  --domain DOMAIN     Domain the license is for, where users open Mintrix (not an IP)
+  --http              Serve plain HTTP on the web port, without a reverse proxy
+                      (default: HTTPS through a reverse proxy on this server)
+  --port PORT         Web port (default: 8000 behind a reverse proxy, 80 with --http)
   --yes               Ask nothing; use the options above and the defaults
 
-The license key is checked with the license server on every run, before the download.
+The license key and domain are checked with the license server on every run, before
+the download.
 EOF
 }
 
@@ -42,8 +46,9 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --version) VERSION="${2:?--version needs a value}"; shift 2 ;;
         --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
-        --url) app_url="${2:?--url needs a value}"; shift 2 ;;
         --license) license_key="${2:?--license needs a value}"; shift 2 ;;
+        --domain) domain="${2:?--domain needs a value}"; shift 2 ;;
+        --http) https=n; shift ;;
         --port) port="${2:?--port needs a value}"; shift 2 ;;
         --yes|-y) assume_yes=true; shift ;;
         --help|-h) usage; exit 0 ;;
@@ -159,16 +164,6 @@ else
     previous=
     say "Installing Mintrix $VERSION into $dir"
 
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    ask port "Web port" "${port:-8000}"
-    ask app_url "Address users open Mintrix at" "${app_url:-http://${ip:-127.0.0.1}:$port}"
-
-    case "$app_url" in
-        # Behind a reverse proxy with HTTPS on this machine: not reachable from outside
-        https://*) bind=127.0.0.1 ;;
-        *) bind=0.0.0.0 ;;
-    esac
-
     cat > "$dir/.env" <<'MINTRIX_ENV_EOF'
 @@ENV_EXAMPLE@@
 MINTRIX_ENV_EOF
@@ -176,37 +171,38 @@ MINTRIX_ENV_EOF
     set_env APP_KEY "base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
     set_env DB_PASSWORD "$(random)"
     set_env DB_ROOT_PASSWORD "$(random)"
-    set_env APP_URL "$app_url"
-    set_env MINTRIX_HTTP_BIND "$bind"
-    set_env MINTRIX_HTTP_PORT "$port"
 fi
 
 # ---------------------------------------------------------------- license
 
-# The host of APP_URL: the domain the license is bound to, as Mintrix itself sends it
-license_domain() {
-    get_env APP_URL | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#[/?\#].*##' -e 's#^.*@##' -e 's#:[0-9]*$##' \
+# The host of URL $1, lower case
+url_host() {
+    printf '%s' "$1" | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#[/?\#].*##' -e 's#^.*@##' -e 's#:[0-9]*$##' \
         | tr '[:upper:]' '[:lower:]'
+}
+
+# A domain name (not an IP address): the ionCube license file is locked to it, and a lock
+# to an IP address cannot be checked inside the containers
+valid_domain() {
+    printf '%s' "$1" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
 }
 
 # A string field of the license server's flat JSON answer
 json_field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" "$2"; }
 
-# Checks license key $1 for the domain of APP_URL with the license server: sets registry,
-# user and token (the login for the images) when it is accepted, says why not otherwise
+# Checks license key $1 for domain $2 with the license server: sets registry, user and
+# token (the login for the images) when it is accepted, says why not otherwise
 license_login() {
     key=$1
-    domain=$(license_domain)
     printf '%s' "$key" | grep -Eq '^[A-Za-z0-9-]+$' || { echo "That is not a license key."; return 1; }
-    printf '%s' "$domain" | grep -Eq '^[a-z0-9.-]+$' || { echo "APP_URL in $dir/.env has no usable domain."; return 1; }
 
     answer=$(mktemp)
     url="${LICENSE_SERVER%/}/registry.php"
     # Over IPv4: the license is bound to this server's IPv4 address
     if command -v curl >/dev/null 2>&1; then
-        curl -4 -sS --max-time 30 -o "$answer" --data "licensekey=$key&domain=$domain" "$url" || true
+        curl -4 -sS --max-time 30 -o "$answer" --data "licensekey=$key&domain=$2" "$url" || true
     else
-        wget -4 -q --content-on-error -T 30 -O "$answer" --post-data "licensekey=$key&domain=$domain" "$url" || true
+        wget -4 -q --content-on-error -T 30 -O "$answer" --post-data "licensekey=$key&domain=$2" "$url" || true
     fi
     registry=$(json_field registry "$answer")
     user=$(json_field user "$answer")
@@ -215,29 +211,84 @@ license_login() {
     rm -f "$answer"
 
     [ -n "$registry" ] && [ -n "$user" ] && [ -n "$token" ] && return 0
-    echo "License key not accepted for $domain: ${error:-the license server could not be reached ($LICENSE_SERVER)}"
+    echo "License not accepted for $2: ${error:-the license server could not be reached ($LICENSE_SERVER)}"
     return 1
 }
 
-# Asked on every run, new install or update, with the current key (or --license) as the
-# default, and checked before anything is downloaded: only a key the license server
-# accepts is saved in .env, and its answer is the login for the images.
-say "Checking the license key"
+# Both asked on every run, new install or update, with the saved ones (or --license and
+# --domain) as defaults, and checked together before anything is downloaded. The first
+# check binds a new license to the domain; only an accepted pair is saved in .env, and the
+# answer is the login for the images.
+say "Checking the license"
 [ -n "$license_key" ] || license_key=$(get_env MINTRIX_LICENSE_KEY)
+[ -n "$domain" ] || domain=$(get_env MINTRIX_DOMAIN)
+[ -n "$domain" ] || { valid_domain "$(url_host "$(get_env APP_URL)")" && domain=$(url_host "$(get_env APP_URL)"); } || true
 while :; do
     if interactive; then
         ask license_key "License key (from your client area)" "$license_key"
+        ask domain "Domain the license is for, where users open Mintrix (e.g. tv.example.com)" "$domain"
     fi
+    domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
     if [ -z "$license_key" ]; then
         interactive || fail "Mintrix needs a license key: run again with --license KEY (from your client area)."
         echo "A license key is required."
         continue
     fi
-    license_login "$license_key" && break
-    interactive || fail "Check the license key and APP_URL in $dir/.env, then run this again."
+    if ! valid_domain "$domain"; then
+        interactive || fail "Mintrix needs a domain name (not an IP address): run again with --domain DOMAIN."
+        echo "Enter a domain name such as tv.example.com, not an IP address: the license is locked to it."
+        continue
+    fi
+    license_login "$license_key" "$domain" && break
+    interactive || fail "Check the license key and domain (or reissue the license in your client area), then run this again."
 done
 set_env MINTRIX_LICENSE_KEY "$license_key"
-echo "License key accepted for $domain."
+set_env MINTRIX_DOMAIN "$domain"
+echo "License accepted for $domain."
+
+# ---------------------------------------------------------------- address
+
+# A new installation chooses how it is served (also one whose first run stopped before
+# this, still at the template's localhost address); an existing one keeps its scheme and
+# port and only takes the new domain
+if [ "$fresh" = true ] || [ "$(url_host "$(get_env APP_URL)")" = localhost ]; then
+    [ -n "$https" ] || ask https "Serve over HTTPS through a reverse proxy on this server? (y/n)" y
+    case "$https" in
+        n|N|no|No)
+            ask port "Web port" "${port:-80}"
+            bind=0.0.0.0
+            app_url="http://$domain"
+            [ "$port" = 80 ] || app_url="$app_url:$port"
+            ;;
+        *)
+            # Reachable only from this machine: the reverse proxy serves HTTPS
+            ask port "Port the reverse proxy forwards to" "${port:-8000}"
+            bind=127.0.0.1
+            app_url="https://$domain"
+            ;;
+    esac
+    set_env APP_URL "$app_url"
+    set_env MINTRIX_HTTP_BIND "$bind"
+    set_env MINTRIX_HTTP_PORT "$port"
+else
+    app_url=$(get_env APP_URL)
+    if [ "$(url_host "$app_url")" != "$domain" ]; then
+        app_url=$(printf '%s' "$app_url" | sed -E "s#^([A-Za-z][A-Za-z0-9+.-]*://)([^/?\#@]*@)?[^:/?\#]+#\1$domain#")
+        set_env APP_URL "$app_url"
+        echo "Address changed to $app_url"
+    fi
+fi
+
+# Only a warning: DNS is often set up after the server
+public_ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
+resolved=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
+if ! command -v getent >/dev/null 2>&1; then
+    :
+elif [ -z "$resolved" ]; then
+    echo "Note: $domain does not resolve yet. Point its DNS (A record) at ${public_ip:-this server}."
+elif [ -n "$public_ip" ] && ! printf ' %s' "$resolved" | grep -q " $public_ip "; then
+    echo "Note: $domain points at $resolved, not at this server ($public_ip). Fine behind a proxy or CDN; otherwise fix its DNS."
+fi
 
 # ---------------------------------------------------------------- images
 
@@ -274,14 +325,14 @@ compose up -d --remove-orphans --wait --wait-timeout 600 \
     || fail "Mintrix did not become ready. See: cd $dir && docker compose logs --tail=100 app"
 
 # The licensed features run only with the license file runtime/node.dat, issued for the
-# license key and the domain of APP_URL. Fetched now rather than by the hourly scheduler.
-say "Checking the license"
+# license key and the domain. Fetched now rather than by the hourly scheduler.
+say "Fetching the license file"
 if compose exec -T app setpriv --reuid=www-data --regid=www-data --init-groups php artisan mintrix:status --sync; then
     # The queue worker and scheduler may have started before the file was there
     compose restart queue scheduler >/dev/null
 else
-    echo "The license file could not be fetched; the licensed features stay off until it is."
-    echo "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env, then run: mintrix-update --version $VERSION"
+    echo "The license is not confirmed yet (see above): the licensed features stay off until it is."
+    echo "Mintrix checks again by itself; to check now, run: mintrix-update --version $VERSION"
 fi
 
 # Only while no administrator exists: running this again never resets a password

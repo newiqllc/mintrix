@@ -14,11 +14,11 @@ sudo sh install.sh
 The script:
 
 1. installs Docker Engine and the Compose plugin when they are missing;
-2. asks for the web port and the address users open Mintrix at (new installations only);
-3. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
-4. asks for your license key (on every run; the saved one is the default) and checks it with the license server: only an active license, for the domain it is bound to, is accepted and saved. The license server's answer is the login for the download, logged out again afterwards;
+2. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
+3. asks for your license key and the domain it is for (on every run; the saved ones are the defaults) and checks them with the license server: only an active license for that domain is accepted and saved. A new license is tied to the domain on this first check. The answer is the login for the download, logged out again afterwards;
+4. on a new installation, asks whether Mintrix is served over HTTPS through a reverse proxy, and the port;
 5. downloads and starts Mintrix and its database;
-6. fetches the license file for your license key and address (`/opt/mintrix/runtime/node.dat`);
+6. fetches the license file for your license and domain (`/opt/mintrix/runtime/node.dat`);
 7. creates the first administrator, `administrator` with the password `password`.
 
 **Sign in and change that password and the account's email right away**: anyone who can reach the panel can try the default.
@@ -26,19 +26,22 @@ The script:
 Without questions, for example from automation:
 
 ```sh
-sudo sh install.sh --yes --url https://mintrix.example.com --license <key>
+sudo sh install.sh --yes --license <key> --domain tv.example.com            # HTTPS through a reverse proxy
+sudo sh install.sh --yes --license <key> --domain tv.example.com --http     # plain HTTP on port 80
 ```
 
-A key the license server refuses is asked for again, with the reason; with `--yes` the script stops and says why. No other login is needed.
+A key and domain the license server refuses are asked for again, with the reason; with `--yes` the script stops and says why. No other login is needed.
 
 `sh install.sh --help` lists all options.
 
-### Address and HTTPS
+### Domain and HTTPS
 
-- An `http://` address makes Mintrix reachable on that port from the network. This is fine for trying it out, but logins and customer data then travel unencrypted.
-- An `https://` address keeps Mintrix reachable only from the server itself, behind a reverse proxy with HTTPS on that server (Caddy, nginx). Point the proxy at `http://127.0.0.1:8000`.
+Mintrix needs a domain name (e.g. `tv.example.com`), not an IP address: the license and its license file are locked to it. Point the domain's DNS at the server; the script only warns when it does not yet.
 
-The license is tied to the domain of this address, so set the final one before adding the license key. Ministra and new streaming servers (Servers > Install Server) call Mintrix at this address: they must be able to reach it.
+- **HTTPS (default):** Mintrix is reachable only from the server itself, at `https://<domain>` behind a reverse proxy with HTTPS on that server (Caddy, nginx). Point the proxy at `http://127.0.0.1:8000`.
+- **`--http`:** Mintrix serves `http://<domain>` on port 80 (or `--port`) to the network. Fine for trying it out, but logins and customer data then travel unencrypted.
+
+To move to another domain, reissue the license in your client area, then run `mintrix-update` and enter the new domain. Ministra and new streaming servers (Servers > Install Server) call Mintrix at its address: they must be able to reach it.
 
 ## Update
 
