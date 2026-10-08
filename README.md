@@ -14,9 +14,9 @@ sudo sh install.sh
 The script:
 
 1. installs Docker Engine and the Compose plugin when they are missing;
-2. asks for the web port, the address users open Mintrix at, and your license key;
+2. asks for the web port and the address users open Mintrix at (new installations only);
 3. creates `/opt/mintrix` with `compose.yaml` and `.env`, using a new encryption key and random database passwords;
-4. gets a registry login for your license key from the license server (only for an active license, for the domain it is bound to), and logs out again after the download;
+4. asks for your license key (on every run; the saved one is the default) and checks it with the license server: only an active license, for the domain it is bound to, is accepted and saved. The license server's answer is the login for the download, logged out again afterwards;
 5. downloads and starts Mintrix and its database;
 6. fetches the license file for your license key and address (`/opt/mintrix/runtime/node.dat`);
 7. creates the first administrator, `administrator` with the password `password`.
@@ -29,7 +29,7 @@ Without questions, for example from automation:
 sudo sh install.sh --yes --url https://mintrix.example.com --license <key>
 ```
 
-When the license server cannot give a login, the script asks for one; with `--yes` it stops and says why.
+A key the license server refuses is asked for again, with the reason; with `--yes` the script stops and says why. No other login is needed.
 
 `sh install.sh --help` lists all options.
 

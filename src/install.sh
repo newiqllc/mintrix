@@ -12,8 +12,7 @@ set -eu
 
 VERSION="@@VERSION@@"
 REPO="@@REPO@@"
-REGISTRY=ghcr.io
-# Gives installations with an active license key the registry login for the images
+# Checks the license key and gives the registry login for the images
 LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://license.newiq.pl}"
 
 dir=/opt/mintrix
@@ -35,7 +34,7 @@ Usage: sudo sh install.sh [options]
   --port PORT         Web port (default: 8000)
   --yes               Ask nothing; use the options above and the defaults
 
-The images are pulled with a login the license server gives for an active license key.
+The license key is checked with the license server on every run, before the download.
 EOF
 }
 
@@ -67,16 +66,6 @@ ask() {
     else
         eval "$1=\$3"
     fi
-}
-
-# shellcheck disable=SC2034  # answer is read by eval
-ask_secret() {
-    printf '%s: ' "$2" >/dev/tty
-    stty -echo </dev/tty 2>/dev/null || true
-    read -r answer </dev/tty || answer=
-    stty echo </dev/tty 2>/dev/null || true
-    printf '\n' >/dev/tty
-    eval "$1=\$answer"
 }
 
 download() {
@@ -173,7 +162,6 @@ else
     ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     ask port "Web port" "${port:-8000}"
     ask app_url "Address users open Mintrix at" "${app_url:-http://${ip:-127.0.0.1}:$port}"
-    ask license_key "License key (from your client area)" "$license_key"
 
     case "$app_url" in
         # Behind a reverse proxy with HTTPS on this machine: not reachable from outside
@@ -189,21 +177,11 @@ MINTRIX_ENV_EOF
     set_env DB_PASSWORD "$(random)"
     set_env DB_ROOT_PASSWORD "$(random)"
     set_env APP_URL "$app_url"
-    set_env MINTRIX_LICENSE_KEY "$license_key"
     set_env MINTRIX_HTTP_BIND "$bind"
     set_env MINTRIX_HTTP_PORT "$port"
 fi
 
-# The license key gets the registry login for the images, so it is needed before the
-# download. --license also sets it on an update (e.g. a new key after a reissue).
-[ -z "$license_key" ] || set_env MINTRIX_LICENSE_KEY "$license_key"
-while [ -z "$(get_env MINTRIX_LICENSE_KEY)" ]; do
-    interactive || fail "Mintrix needs a license key: run again with --license KEY (from your client area)."
-    ask license_key "License key (from your client area)" ""
-    [ -z "$license_key" ] || set_env MINTRIX_LICENSE_KEY "$license_key"
-done
-
-# ---------------------------------------------------------------- images
+# ---------------------------------------------------------------- license
 
 # The host of APP_URL: the domain the license is bound to, as Mintrix itself sends it
 license_domain() {
@@ -214,13 +192,12 @@ license_domain() {
 # A string field of the license server's flat JSON answer
 json_field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" "$2"; }
 
-# Sets registry, user and token from the license server, for the license key and domain
-# in .env; says why not otherwise
+# Checks license key $1 for the domain of APP_URL with the license server: sets registry,
+# user and token (the login for the images) when it is accepted, says why not otherwise
 license_login() {
-    key=$(get_env MINTRIX_LICENSE_KEY)
+    key=$1
     domain=$(license_domain)
-    [ -n "$key" ] || { echo "No license key in $dir/.env (MINTRIX_LICENSE_KEY)."; return 1; }
-    printf '%s' "$key" | grep -Eq '^[A-Za-z0-9-]+$' || { echo "The license key in $dir/.env is not valid."; return 1; }
+    printf '%s' "$key" | grep -Eq '^[A-Za-z0-9-]+$' || { echo "That is not a license key."; return 1; }
     printf '%s' "$domain" | grep -Eq '^[a-z0-9.-]+$' || { echo "APP_URL in $dir/.env has no usable domain."; return 1; }
 
     answer=$(mktemp)
@@ -238,35 +215,44 @@ license_login() {
     rm -f "$answer"
 
     [ -n "$registry" ] && [ -n "$user" ] && [ -n "$token" ] && return 0
-    echo "The license server gave no registry login for $domain: ${error:-it could not be reached ($LICENSE_SERVER)}"
+    echo "License key not accepted for $domain: ${error:-the license server could not be reached ($LICENSE_SERVER)}"
     return 1
 }
 
+# Asked on every run, new install or update, with the current key (or --license) as the
+# default, and checked before anything is downloaded: only a key the license server
+# accepts is saved in .env, and its answer is the login for the images.
+say "Checking the license key"
+[ -n "$license_key" ] || license_key=$(get_env MINTRIX_LICENSE_KEY)
+while :; do
+    if interactive; then
+        ask license_key "License key (from your client area)" "$license_key"
+    fi
+    if [ -z "$license_key" ]; then
+        interactive || fail "Mintrix needs a license key: run again with --license KEY (from your client area)."
+        echo "A license key is required."
+        continue
+    fi
+    license_login "$license_key" && break
+    interactive || fail "Check the license key and APP_URL in $dir/.env, then run this again."
+done
+set_env MINTRIX_LICENSE_KEY "$license_key"
+echo "License key accepted for $domain."
+
+# ---------------------------------------------------------------- images
+
 registry_logout() { docker logout "$registry" >/dev/null 2>&1 || true; }
 
-# Logs in for the pull with the license server's login, else one typed in
-registry_login() {
-    if ! license_login; then
-        interactive || fail "Check MINTRIX_LICENSE_KEY and APP_URL in $dir/.env and run this again."
-        echo "Log in to the registry instead (the GitHub login you were given with your license)."
-        registry=$REGISTRY user=
-        ask user "GitHub user name" "$user"
-        ask_secret token "Token"
-    fi
-    if [ -z "$user" ] || [ -z "$token" ]; then fail "No registry login."; fi
-    # The login only lasts for the pull, so the token is not left in Docker's config
-    trap registry_logout EXIT
-    printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >/dev/null \
-        || fail "$registry refused the login."
-}
-
 say "Downloading Mintrix $VERSION"
-# Pulled before anything changes: a wrong version or a missing login stops here.
+# Pulled before anything changes: a wrong version stops here.
 # MINTRIX_SKIP_PULL=1 is only for testing images loaded on this machine.
 if [ "${MINTRIX_SKIP_PULL:-}" = 1 ]; then
     echo "Skipped (MINTRIX_SKIP_PULL=1)"
 else
-    registry_login
+    # The login only lasts for the pull, so the token is not left in Docker's config
+    trap registry_logout EXIT
+    printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >/dev/null \
+        || fail "$registry refused the login from the license server."
     MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql \
         || fail "Could not download Mintrix $VERSION. Check the version: https://github.com/$REPO/releases"
     registry_logout
