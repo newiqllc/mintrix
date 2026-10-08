@@ -292,21 +292,23 @@ fi
 
 # ---------------------------------------------------------------- images
 
-registry_logout() { docker logout "$registry" >/dev/null 2>&1 || true; }
-
 say "Downloading Mintrix $VERSION"
 # Pulled before anything changes: a wrong version stops here.
 # MINTRIX_SKIP_PULL=1 is only for testing images loaded on this machine.
 if [ "${MINTRIX_SKIP_PULL:-}" = 1 ]; then
     echo "Skipped (MINTRIX_SKIP_PULL=1)"
 else
-    # The login only lasts for the pull, so the token is not left in Docker's config
-    trap registry_logout EXIT
-    printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >/dev/null \
-        || fail "$registry refused the login from the license server."
+    # The login lives in a Docker config of its own, removed after the pull: the token
+    # never goes into root's Docker config (nor its "stored unencrypted" warning)
+    DOCKER_CONFIG=$(mktemp -d)
+    export DOCKER_CONFIG
+    trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+    printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >"$DOCKER_CONFIG/login.log" 2>&1 \
+        || fail "$registry refused the login from the license server: $(tail -n 1 "$DOCKER_CONFIG/login.log")"
     MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql \
         || fail "Could not download Mintrix $VERSION. Check the version: https://github.com/$REPO/releases"
-    registry_logout
+    rm -rf "$DOCKER_CONFIG"
+    unset DOCKER_CONFIG
     trap - EXIT
 fi
 

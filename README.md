@@ -52,6 +52,17 @@ sudo mintrix-update --version 0.1.2      # a given version, also to go back
 
 An update backs up the database to `/opt/mintrix/mysql_backups/` first, keeps `.env`, and replaces `compose.yaml`. Going back to an older version does not undo its database changes: restore the backup taken before the update.
 
+## Reinstall
+
+To start again from scratch. **This deletes the database and all data of the installation**; keep a backup from `/opt/mintrix/mysql_backups/` if you may need it.
+
+```sh
+cd /opt/mintrix && sudo docker compose down -v --remove-orphans
+sudo rm -rf /opt/mintrix /usr/local/bin/mintrix-update
+```
+
+Then install as above. Without removing `/opt/mintrix`, the script finds its `.env` and updates instead.
+
 ## Settings
 
 The settings are in `/opt/mintrix/.env`, and the comments there explain each one. After a change, apply it with `sudo mintrix-update --version <running version>`; this also fetches the license file after you add or change `MINTRIX_LICENSE_KEY`. Keep `.env` private and back it up with your database: a backup is only usable with the same `APP_KEY`.
