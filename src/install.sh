@@ -199,7 +199,7 @@ fi
 # The host of APP_URL: the domain the license is bound to, as Mintrix itself sends it
 license_domain() {
     get_env APP_URL | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#[/?\#].*##' -e 's#^.*@##' -e 's#:[0-9]*$##' \
-        | tr 'A-Z' 'a-z'
+        | tr '[:upper:]' '[:lower:]'
 }
 
 # A string field of the license server's flat JSON answer
@@ -244,7 +244,7 @@ registry_login() {
         ask user "GitHub user name" "$user"
         ask_secret token "Token"
     fi
-    [ -n "$user" ] && [ -n "$token" ] || fail "No registry login."
+    if [ -z "$user" ] || [ -z "$token" ]; then fail "No registry login."; fi
     # The login only lasts for the pull, so the token is not left in Docker's config
     trap registry_logout EXIT
     printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >/dev/null \
