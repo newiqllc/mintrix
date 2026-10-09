@@ -3,7 +3,12 @@
 #   https://github.com/<this repo>/releases/latest/download/install.sh
 #
 # Started by the Mintrix release workflow (repository_dispatch "mintrix-release" with
-# client_payload.version) once its images are pushed, or by hand from the Actions tab.
+# client_payload.version and client_payload.release) once its images are pushed, or by
+# hand from the Actions tab.
+#
+# client_payload.release is attached as release.json, which the update check (WHMCS addon
+# mintrix_licensefile) reads: security, min_middleware and the images by digest. A run by
+# hand has none, so that release is offered without them.
 name: Release installer
 
 on:
@@ -45,8 +50,25 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_JSON: ${{ toJSON(github.event.client_payload.release) }}
         run: |
           tag="v$VERSION"
+          assets=dist/install.sh
+          security=
+          if [ "$RELEASE_JSON" != null ] && [ -n "$RELEASE_JSON" ]; then
+              printf '%s\n' "$RELEASE_JSON" > dist/release.json
+              # Only for this version, or the update check would show another release's details
+              [ "$(jq -r .version dist/release.json)" = "$VERSION" ] \
+                  || { echo "::error::release.json is for $(jq -r .version dist/release.json), not $VERSION"; exit 1; }
+              cat dist/release.json
+              assets="$assets dist/release.json"
+              [ "$(jq -r .security dist/release.json)" = true ] \
+                  && security="**Security release**: update installations soon.
+
+          "
+          else
+              echo "::warning::No release.json for $VERSION (started by hand): the update check offers it without security and middleware details"
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
               echo "::error::$tag is released already. Releases are never moved; use the next number."
               exit 1
@@ -57,9 +79,9 @@ jobs:
               *-*) [ "$finals" -gt 0 ] && flags=--prerelease || flags=--latest ;;
               *) flags=--latest ;;
           esac
-          gh release create "$tag" dist/install.sh --target "$GITHUB_SHA" $flags \
+          gh release create "$tag" $assets --target "$GITHUB_SHA" $flags \
             --title "Mintrix $VERSION" \
-            --notes "Install on a Linux server (x86-64):
+            --notes "${security}Install on a Linux server (x86-64):
 
           \`\`\`sh
           wget https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh
