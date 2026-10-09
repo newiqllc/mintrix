@@ -318,7 +318,9 @@ for setting in "MINTRIX_HTTP_PORT:80:$port" "MINTRIX_HTTPS_PORT:443:$https_port"
     case "$value" in
         *[!0-9]*) fail "Not a port: $value" ;;
     esac
-    [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "Not a port: $value"
+    if [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+        fail "Not a port: $value"
+    fi
     if port_in_use "$value" && ! mintrix_holds "$key" "$value" "$default"; then
         fail "Port $value is in use on this server: stop what listens there, or choose another port."
     fi
