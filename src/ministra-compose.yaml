@@ -1,0 +1,95 @@
+# Ministra, run from the released image.
+# Written by ministra-install.sh, replaced on every update: change settings in .env instead.
+name: ministra
+
+# Shared by the portal and its cron service: same image, same settings
+x-ministra: &ministra
+  image: ${MINISTRA_IMAGE:-ghcr.io/newiqllc/ministra}:${MINISTRA_VERSION:?set MINISTRA_VERSION in .env (ministra-install.sh does this)}
+  # The image is built for x86-64 servers
+  platform: linux/amd64
+  environment:
+    MINISTRA_DB_HOST: mysql
+    MINISTRA_DB_PORT: 3306
+    MINISTRA_DB_NAME: ${MYSQL_DATABASE:-stalker_db}
+    MINISTRA_DB_USER: ${MYSQL_USER:-stalker}
+    MINISTRA_DB_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    MINISTRA_MEMCACHE_HOST: memcached
+    # Ministra's REST API login, which Mintrix uses (Mintrix > Settings > Ministra)
+    MINISTRA_API_LOGIN: ${MINISTRA_API_LOGIN:?set MINISTRA_API_LOGIN in .env}
+    MINISTRA_API_PASSWORD: ${MINISTRA_API_PASSWORD:?set MINISTRA_API_PASSWORD in .env}
+    MINISTRA_MIGRATE: ${MINISTRA_MIGRATE:-on}
+    # Change notifications to Mintrix (admin panel edits reach Mintrix right away)
+    MINTRIX_SERVER_URL: ${MINTRIX_SERVER_URL:-}
+    MINTRIX_API_KEY: ${MINTRIX_API_KEY:-}
+    MINTRIX_TIMEOUT: ${MINTRIX_TIMEOUT:-5}
+  volumes:
+    # config.ini and custom.ini, editable here and kept across updates
+    - ./config:/etc/ministra
+    # Uploaded logos, installed themes and applications
+    - misc:/var/www/html/stalker_portal/misc
+    - apps:/var/www/html/stalker_apps
+    - launcher_apps:/var/www/html/stalker_launcher_apps
+  extra_hosts:
+    # Lets Ministra reach a Mintrix running on this same machine as http://host.docker.internal
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
+services:
+  # Migrates the database on start, then serves the portal
+  ministra:
+    <<: *ministra
+    # The port on this server, from .env: after changing it, run docker compose up -d.
+    # BIND empty = every address of the server; 127.0.0.1 = only this machine.
+    ports:
+      - "${MINISTRA_HTTP_BIND:-}${MINISTRA_HTTP_BIND:+:}${MINISTRA_HTTP_PORT:-80}:88"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ministra-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 600s
+
+  # Ministra's scheduled tasks: account expiry, tariff switches, EPG updates, log cleanup
+  cron:
+    <<: *ministra
+    command: ["cron"]
+    depends_on:
+      ministra:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:5.7
+    platform: linux/amd64
+    # Ministra's tables are utf8 and expect the permissive SQL mode of its own installs
+    command: ["--character-set-server=utf8", "--collation-server=utf8_general_ci", "--sql-mode=", "--max-allowed-packet=32M"]
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stalker_db}
+      MYSQL_USER: ${MYSQL_USER:-stalker}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    # No host port: only reachable from the other containers
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  memcached:
+    image: memcached:1.6-alpine
+    command: ["memcached", "-m", "128", "-I", "4m"]
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  misc:
+  apps:
+  launcher_apps:
