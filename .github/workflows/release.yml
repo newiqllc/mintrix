@@ -1,6 +1,8 @@
-# Publishes install.sh for a Mintrix version as a release of this repository:
+# Publishes install.sh and ministra-install.sh for a Mintrix version as a release of this
+# repository:
 #
 #   https://github.com/<this repo>/releases/latest/download/install.sh
+#   https://github.com/<this repo>/releases/latest/download/ministra-install.sh
 #
 # Started by the Mintrix release workflow (repository_dispatch "mintrix-release" with
 # client_payload.version and client_payload.release) once its images are pushed, or by
@@ -40,11 +42,14 @@ jobs:
 
       - name: Check
         run: |
-          shellcheck -s sh build.sh dist/install.sh
+          shellcheck -s sh build.sh dist/install.sh dist/ministra-install.sh
           sh dist/install.sh --help >/dev/null
+          sh dist/ministra-install.sh --help >/dev/null
           # The Compose file the installer writes is valid with the settings it fills in
           printf 'APP_KEY=base64:x\nDB_PASSWORD=x\nDB_ROOT_PASSWORD=x\nMINTRIX_VERSION=%s\n' "$VERSION" > "$RUNNER_TEMP/env"
           docker compose -f src/compose.yaml --env-file "$RUNNER_TEMP/env" config --quiet
+          printf 'MYSQL_PASSWORD=x\nMYSQL_ROOT_PASSWORD=x\nMINISTRA_API_LOGIN=x\nMINISTRA_API_PASSWORD=x\nMINISTRA_VERSION=0.1.0\n' > "$RUNNER_TEMP/ministra-env"
+          docker compose -f src/ministra-compose.yaml --env-file "$RUNNER_TEMP/ministra-env" config --quiet
 
       - name: Publish
         if: github.event_name != 'pull_request'
@@ -53,7 +58,7 @@ jobs:
           RELEASE_JSON: ${{ toJSON(github.event.client_payload.release) }}
         run: |
           tag="v$VERSION"
-          assets=dist/install.sh
+          assets="dist/install.sh dist/ministra-install.sh"
           security=
           if [ "$RELEASE_JSON" != null ] && [ -n "$RELEASE_JSON" ]; then
               printf '%s\n' "$RELEASE_JSON" > dist/release.json
@@ -88,4 +93,11 @@ jobs:
           sudo sh install.sh
           \`\`\`
 
-          Update an installation to this version: \`mintrix-update --version $VERSION\`"
+          Update an installation to this version: \`mintrix-update --version $VERSION\`
+
+          Ministra, for this Mintrix (on this or another server):
+
+          \`\`\`sh
+          wget https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/ministra-install.sh
+          sudo sh ministra-install.sh
+          \`\`\`"

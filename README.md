@@ -113,13 +113,55 @@ docker compose exec app php artisan mintrix:create-admin            # another ad
 docker compose exec app php artisan mintrix:2fa-reset <email>       # reset two-factor authentication
 ```
 
+## Ministra
+
+Ministra is installed for a Mintrix installation, on the same server or another one (x86-64 Linux, 2 GB RAM or more), with its own script:
+
+```sh
+wget https://github.com/newiqllc/mintrix/releases/latest/download/ministra-install.sh
+sudo sh ministra-install.sh
+```
+
+It asks for the address of your Mintrix and its **Inbound API Key** (Mintrix > Settings > Ministra). Mintrix checks the key and its own license, then allows the download and names the Ministra version that fits it: no license key is needed on the Ministra server, and the server must be able to reach Mintrix. The script then:
+
+1. installs Docker Engine and the Compose plugin when they are missing;
+2. creates `/opt/ministra` with `compose.yaml` and `.env`, using random database passwords and a Ministra REST API login for Mintrix;
+3. downloads and starts Ministra, its database, memcached and its scheduled tasks; the first start creates the database, which takes a few minutes;
+4. prints the address and the API login to enter in Mintrix > Settings > Ministra.
+
+Ministra's change notifications go to the Mintrix address you entered. When Mintrix runs on the same server, the portal also joins Mintrix's network, so Mintrix reaches it as `http://ministra:88/stalker_portal`; the portal then listens on port 8080, because Mintrix holds 80.
+
+Without questions: `sudo sh ministra-install.sh --yes --mintrix https://panel.example.com --api-key <key>`. `sh ministra-install.sh --help` lists all options.
+
+### Update
+
+```sh
+sudo ministra-update                     # the Ministra version your Mintrix names
+sudo ministra-update --version 0.2.1     # a given version
+```
+
+Each update asks Mintrix again (with the address and key saved in `/opt/ministra/.env`), backs up the database to `/opt/ministra/mysql_backups/` and keeps `.env`. The download login is never stored on the server. While Mintrix's license is not active, Ministra keeps running but cannot be installed or updated.
+
+### Settings and data
+
+- `/opt/ministra/.env`: the port, the Mintrix address and key, the database passwords. After a change, run `sudo ministra-update --version <running version>`.
+- `/opt/ministra/config/`: Ministra's `config.ini` and `custom.ini`. `custom.ini` overrides `config.ini`; its database, cache, API and Mintrix settings are rewritten from `.env` on every start. After editing, run `sudo docker compose restart ministra cron` in `/opt/ministra`.
+- Docker volumes: the database, uploaded logos and themes, and installed applications.
+
+To start again from scratch (**this deletes Ministra's database**):
+
+```sh
+cd /opt/ministra && sudo docker compose down -v --remove-orphans
+sudo rm -rf /opt/ministra /usr/local/bin/ministra-update
+```
+
 ## Releasing (maintainers)
 
-The Mintrix release workflow starts `.github/workflows/release.yml` here once a version's images are pushed. It builds `dist/install.sh` from `src/install.sh`, writes `src/compose.yaml`, `src/env.example` and the version into it, checks it, and attaches it to a release `v<version>`. To build one locally:
+The Mintrix release workflow starts `.github/workflows/release.yml` here once a version's images are pushed. It builds `dist/install.sh` from `src/install.sh` (with `src/compose.yaml`, `src/env.example` and the version written into it) and `dist/ministra-install.sh` from `src/ministra-install.sh` (with `src/ministra-compose.yaml` and `src/ministra-env.example`), checks both, and attaches them to a release `v<version>`. To build one locally:
 
 ```sh
 sh build.sh 0.1.0
 ```
 
-To test an installer against images loaded on the machine instead of downloaded, set `MINTRIX_SKIP_PULL=1`.
+To test an installer against images loaded on the machine instead of downloaded, set `MINTRIX_SKIP_PULL=1` (Ministra: `MINISTRA_SKIP_PULL=1`).
 
