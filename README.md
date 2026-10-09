@@ -142,6 +142,8 @@ sudo ministra-update --version 0.2.1     # a given version
 
 Each update asks Mintrix again (with the address and key saved in `/opt/ministra/.env`), backs up the database to `/opt/ministra/mysql_backups/` and keeps `.env`. The download login is never stored on the server. While Mintrix's license is not active, Ministra keeps running but cannot be installed or updated.
 
+Going back to an older Ministra version is refused, because its database changes are not undone; `--force` does it anyway (restore the backup taken before the newer version if the portal then does not start).
+
 ### Settings and data
 
 - `/opt/ministra/.env`: the port, the Mintrix address and key, the database passwords. After a change, run `sudo ministra-update --version <running version>`.

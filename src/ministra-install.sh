@@ -21,6 +21,7 @@ mintrix_url=
 api_key=
 port=
 assume_yes=false
+force=false
 
 usage() {
     cat <<EOF
@@ -35,6 +36,8 @@ Usage: sudo sh ministra-install.sh [options]
   --port PORT         Port the portal listens on, open to the network (default: 80, or
                       8080 when 80 is taken)
   --yes               Ask nothing; use the options above and the defaults
+  --force             Allow going back to an older Ministra version (its database is
+                      not changed back: restore a backup from mysql_backups/ if needed)
 
 Mintrix checks the API key and its own license on every run, before the download.
 EOF
@@ -48,6 +51,7 @@ while [ $# -gt 0 ]; do
         --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
         --port) port="${2:?--port needs a value}"; shift 2 ;;
         --yes|-y) assume_yes=true; shift ;;
+        --force) force=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
     esac
@@ -109,6 +113,26 @@ port_in_use() {
 }
 
 valid_version() { printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; }
+
+# Whether version $1 is older than version $2 (both valid): 0.2.0-beta.1 < 0.2.0 < 0.2.1
+version_older() {
+    awk -v a="$1" -v b="$2" '
+        # major, minor, patch; then the release itself above any prerelease of it
+        # (rank 9), and alpha < beta < rc with their number
+        function key(v,   n, parts, core, pre, rank, num) {
+            n = split(v, parts, "-")
+            split(parts[1], core, ".")
+            rank = 9; num = 0
+            if (n > 1) {
+                split(parts[2], pre, ".")
+                rank = (pre[1] == "alpha") ? 1 : (pre[1] == "beta") ? 2 : 3
+                num = pre[2]
+            }
+            return sprintf("%09d%09d%09d%d%09d", core[1], core[2], core[3], rank, num)
+        }
+        BEGIN { exit !(key(a) < key(b)) }
+    '
+}
 
 # A string field of a flat JSON answer
 json_field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" "$2"; }
@@ -280,6 +304,14 @@ set_env MINTRIX_API_KEY "$api_key"
 [ -n "$version" ] || version=$answer_version
 valid_version "$version" || fail "Mintrix did not name a Ministra version to install; run again with --version VERSION."
 echo "Mintrix allows Ministra $version."
+
+# Migrations only go forward: an older version would run on a database already changed
+# by the newer one
+if [ -n "$previous" ] && valid_version "$previous" && version_older "$version" "$previous" && [ "$force" = false ]; then
+    fail "Ministra $version is older than the installed $previous, and going back does not undo
+the database changes of $previous. To go back anyway, run again with --force (and restore the
+backup taken before $previous from $dir/mysql_backups/ if the portal does not start)."
+fi
 
 # ---------------------------------------------------------------- port
 
