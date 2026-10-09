@@ -20,6 +20,8 @@ domain=
 license_key=
 port=
 https=
+https_port=
+cloudflare=
 assume_yes=false
 
 usage() {
@@ -32,9 +34,11 @@ Usage: sudo sh install.sh [options]
   --dir DIR           Installation folder (default: /opt/mintrix)
   --license KEY       License key, from your client area
   --domain DOMAIN     Domain the license is for, where users open Mintrix (not an IP)
-  --port PORT         Port Mintrix listens on, open to the network (default: 80)
-  --http              Users open http://DOMAIN (default: https://DOMAIN, with HTTPS
-                      from Cloudflare or another proxy in front)
+  --port PORT         Port Mintrix listens on for HTTP, open to the network (default: 80)
+  --https-port PORT   Port Mintrix listens on for HTTPS (default: 443, or 8443 when 443
+                      is taken). Certificate: see README
+  --cloudflare        Cloudflare is in front: Mintrix sees each visitor's own IP address
+  --http              Users open http://DOMAIN (default: https://DOMAIN)
   --yes               Ask nothing; use the options above and the defaults
 
 The license key and domain are checked with the license server on every run, before
@@ -50,6 +54,8 @@ while [ $# -gt 0 ]; do
         --domain) domain="${2:?--domain needs a value}"; shift 2 ;;
         --http) https=n; shift ;;
         --port) port="${2:?--port needs a value}"; shift 2 ;;
+        --https-port) https_port="${2:?--https-port needs a value}"; shift 2 ;;
+        --cloudflare) cloudflare=y; shift ;;
         --yes|-y) assume_yes=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
@@ -96,7 +102,19 @@ get_env() { sed -n "s/^$1=//p" "$dir/.env" | tail -n 1; }
 
 random() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32; }
 
-compose() { docker compose --project-directory "$dir" -f "$dir/compose.yaml" "$@"; }
+# compose.override.yaml is yours: kept across updates, merged in when it exists
+compose() {
+    if [ -f "$dir/compose.override.yaml" ]; then
+        docker compose --project-directory "$dir" -f "$dir/compose.yaml" -f "$dir/compose.override.yaml" "$@"
+    else
+        docker compose --project-directory "$dir" -f "$dir/compose.yaml" "$@"
+    fi
+}
+
+# Whether something on this server listens on TCP port $1 (unknown without ss: no)
+port_in_use() {
+    command -v ss >/dev/null 2>&1 && [ -n "$(ss -Hltn "sport = :$1" 2>/dev/null)" ]
+}
 
 # ---------------------------------------------------------------- checks
 
@@ -140,8 +158,8 @@ docker info >/dev/null 2>&1 || fail "Docker is installed but not running. Start 
 
 # ---------------------------------------------------------------- files
 
-mkdir -p "$dir/mysql_backups" "$dir/runtime"
-chmod 700 "$dir"
+mkdir -p "$dir/mysql_backups" "$dir/runtime" "$dir/certs" "$dir/nginx"
+chmod 700 "$dir" "$dir/certs"
 
 # compose.yaml belongs to the installer and is replaced on every run
 cat > "$dir/compose.yaml" <<'MINTRIX_COMPOSE_EOF'
@@ -248,23 +266,33 @@ echo "License accepted for $domain."
 
 # ---------------------------------------------------------------- address
 
-# Mintrix listens on one port, open to the network. HTTPS, when used, comes from in front
-# of it (Cloudflare, or another proxy): it only decides the address. A new installation
-# asks (also one whose first run stopped before this, still at the template's localhost
-# address); an existing one keeps its address and only takes a new domain, or --port.
+# Mintrix listens on an HTTP and an HTTPS port, both open to the network (MINTRIX_HTTP_PORT
+# and MINTRIX_HTTPS_PORT in .env). A new installation asks (also one whose first run
+# stopped before this, still at the template's localhost address); an existing one keeps
+# its address and ports and only takes a new domain, --port, --https-port or --cloudflare.
 if [ "$fresh" = true ] || [ "$(url_host "$(get_env APP_URL)")" = localhost ]; then
-    ask port "Port Mintrix listens on" "${port:-80}"
-    [ -n "$https" ] || ask https "Do users open it over HTTPS (Cloudflare or another proxy in front)? (y/n)" y
+    if [ -z "$port" ]; then
+        port=80
+        port_in_use 80 && { echo "Port 80 is in use on this server (another web server?)."; port=8080; }
+    fi
+    ask port "Port Mintrix listens on for HTTP" "$port"
+    if [ -z "$https_port" ]; then
+        https_port=443
+        port_in_use 443 && { echo "Port 443 is in use on this server (another web server or proxy?)."; https_port=8443; }
+    fi
+    ask https_port "Port Mintrix listens on for HTTPS" "$https_port"
+    [ -n "$https" ] || ask https "Do users open it over HTTPS? (y/n)" y
     case "$https" in
         n|N|no|No)
             app_url="http://$domain"
             [ "$port" = 80 ] || app_url="$app_url:$port"
             ;;
-        *) app_url="https://$domain" ;;
+        *)
+            app_url="https://$domain"
+            [ -n "$cloudflare" ] || ask cloudflare "Is Cloudflare in front of it? (y/n)" y
+            ;;
     esac
     set_env APP_URL "$app_url"
-    set_env MINTRIX_HTTP_BIND 0.0.0.0
-    set_env MINTRIX_HTTP_PORT "$port"
 else
     app_url=$(get_env APP_URL)
     if [ "$(url_host "$app_url")" != "$domain" ]; then
@@ -272,12 +300,26 @@ else
         set_env APP_URL "$app_url"
         echo "Address changed to $app_url"
     fi
-    if [ -n "$port" ]; then
-        set_env MINTRIX_HTTP_BIND 0.0.0.0
-        set_env MINTRIX_HTTP_PORT "$port"
-        echo "Listening on port $port"
-    fi
 fi
+
+# A changed port must be free (the one Mintrix already uses is)
+for setting in "MINTRIX_HTTP_PORT:$port" "MINTRIX_HTTPS_PORT:$https_port"; do
+    key=${setting%%:*}
+    value=${setting#*:}
+    [ -n "$value" ] || continue
+    case "$value" in
+        ""|*[!0-9]*) fail "Not a port: $value" ;;
+    esac
+    if [ "$value" != "$(get_env "$key")" ] && port_in_use "$value"; then
+        fail "Port $value is in use on this server: stop what listens there, or choose another port."
+    fi
+    set_env "$key" "$value"
+done
+[ "$port" != "$https_port" ] || [ -z "$port" ] || fail "HTTP and HTTPS need different ports."
+case "$cloudflare" in
+    y|Y|yes|Yes) set_env MINTRIX_TRUSTED_PROXIES cloudflare ;;
+esac
+echo "Listening on port $(get_env MINTRIX_HTTP_PORT) (HTTP) and $(get_env MINTRIX_HTTPS_PORT) (HTTPS)"
 
 # Only a warning: DNS is often set up after the server
 public_ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
@@ -373,10 +415,12 @@ Mintrix $VERSION is installed.
   Update:    mintrix-update
 
 EOF
-    case "$url" in
-        https://*) echo "Mintrix listens on port $(get_env MINTRIX_HTTP_PORT) without HTTPS: put Cloudflare (SSL/TLS mode Flexible) or another HTTPS proxy in front of it." ;;
-        *) echo "Mintrix is reachable without HTTPS. For use over the internet, put Cloudflare or another HTTPS proxy in front (see README)." ;;
-    esac
+    cat <<EOF
+Ports: $(get_env MINTRIX_HTTP_PORT) (HTTP) and $(get_env MINTRIX_HTTPS_PORT) (HTTPS), set in $dir/.env.
+HTTPS uses a self-signed certificate until you add your own: put mintrix.crt and
+mintrix.key in $dir/certs, then run: cd $dir && docker compose restart nginx
+Behind Cloudflare: SSL/TLS mode Full, or Full (strict) with a Cloudflare Origin Certificate.
+EOF
 else
     echo
     echo "Mintrix $VERSION is running${previous:+ (was $previous)}."

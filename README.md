@@ -38,12 +38,37 @@ A key and domain the license server refuses are asked for again, with the reason
 
 Mintrix needs a domain name (e.g. `tv.example.com`), not an IP address: the license and its license file are locked to it. Point the domain's DNS at the server; the script only warns when it does not yet.
 
-Mintrix listens on one port (default 80, `--port` to change it) with plain HTTP, open to the network. It does not handle certificates itself:
+Mintrix listens for HTTP on port 80 and for HTTPS on port 443, both open to the network. The installer asks for both (8080 and 8443 are offered when 80 or 443 is taken).
 
-- **HTTPS (default):** users open `https://<domain>`, and Cloudflare (or another proxy) in front provides HTTPS. In Cloudflare, proxy the record (orange cloud) and set SSL/TLS to **Flexible** for this hostname, since the server speaks plain HTTP.
-- **`--http`:** users open `http://<domain>` directly. Fine for trying it out, but logins and customer data then travel unencrypted.
+| Setup | Cloudflare SSL/TLS mode |
+|---|---|
+| Cloudflare in front, Cloudflare Origin Certificate in `certs/` | **Full (strict)**: encrypted and checked all the way |
+| Cloudflare in front, self-signed certificate (none added) | **Full** |
+| Cloudflare in front, over HTTP only | **Flexible** (plain HTTP between Cloudflare and the server) |
+| No proxy, your own certificate in `certs/` | — |
 
-To change the port later: `mintrix-update --port <port>`.
+#### Ports
+
+Set in `/opt/mintrix/.env`, then applied in `/opt/mintrix` with `sudo docker compose up -d`:
+
+```sh
+MINTRIX_HTTP_PORT=80
+MINTRIX_HTTPS_PORT=443
+MINTRIX_HTTP_BIND=            # empty: every address (IPv4 and IPv6); 127.0.0.1: this server only
+MINTRIX_HTTPS_BIND=           # 127.0.0.1 also keeps HTTPS (or HTTP) from being reached at all
+```
+
+`mintrix-update --port <port> --https-port <port>` does the same and checks the ports are free.
+
+With `--http`, users open `http://<domain>` directly: fine for trying it out, but logins and customer data then travel unencrypted.
+
+#### Certificate
+
+Put the certificate (with its intermediate chain appended) and its key in `/opt/mintrix/certs/` as `mintrix.crt` and `mintrix.key`, then run `sudo docker compose restart nginx` in `/opt/mintrix`. Any certificate works: a free Cloudflare Origin Certificate (SSL/TLS > Origin Server, valid up to 15 years), a bought one, or Let's Encrypt. Without one, Mintrix serves a self-signed certificate; with one that is expired or does not match its key, it serves the self-signed one too and says why in `docker compose logs nginx`. It also warns there two weeks before the certificate expires.
+
+#### Behind Cloudflare or another proxy
+
+Set `MINTRIX_TRUSTED_PROXIES=cloudflare` in `.env` (the installer asks), or your proxy's addresses, so Mintrix sees each visitor's own IP address (sign-in limits, IP whitelist, logs). Allow ports 80 and 443 only from Cloudflare's addresses in the server's firewall, so nobody bypasses it.
 
 To move to another domain, reissue the license in your client area, then run `mintrix-update` and enter the new domain. Ministra and new streaming servers (Servers > Install Server) call Mintrix at its address: they must be able to reach it.
 
@@ -70,6 +95,15 @@ Then install as above. Without removing `/opt/mintrix`, the script finds its `.e
 ## Settings
 
 The settings are in `/opt/mintrix/.env`, and the comments there explain each one. After a change, apply it with `sudo mintrix-update --version <running version>`; this also fetches the license file after you add or change `MINTRIX_LICENSE_KEY`. Keep `.env` private and back it up with your database: a backup is only usable with the same `APP_KEY`.
+
+### Your own changes
+
+`compose.yaml` is replaced on every update. Keep your changes in files the update never touches:
+
+- `/opt/mintrix/compose.override.yaml`: merged into `compose.yaml` (extra ports, volumes or services).
+- `/opt/mintrix/nginx/*.conf`: added inside Mintrix's nginx server block (extra headers, `allow`/`deny` rules, locations).
+
+Apply them in `/opt/mintrix` with `sudo docker compose up -d`.
 
 ## Administrator accounts
 
