@@ -107,9 +107,11 @@ compose() {
     docker compose --project-directory "$dir" $files "$@"
 }
 
-# Whether something on this server listens on TCP port $1 (unknown without ss: no)
+# Whether something on this server listens on TCP port $1: a program (ss), or a port a
+# Docker container publishes, such as Mintrix's (often missing from ss)
 port_in_use() {
-    command -v ss >/dev/null 2>&1 && [ -n "$(ss -Hltn "sport = :$1" 2>/dev/null)" ]
+    { command -v ss >/dev/null 2>&1 && [ -n "$(ss -Hltn "sport = :$1" 2>/dev/null)" ]; } \
+        || docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -Eq ":$1->"
 }
 
 valid_version() { printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; }
@@ -315,7 +317,15 @@ fi
 
 # ---------------------------------------------------------------- port
 
-# A new installation asks; an existing one keeps its port unless --port is given
+# A new installation asks; an existing one keeps its port unless --port is given, but
+# while its portal is not running the saved port must still be free (a first run that
+# stopped on a taken port saved it)
+if [ "$fresh" = false ] && [ -z "$port" ]; then
+    saved=$(get_env MINISTRA_HTTP_PORT)
+    if port_in_use "${saved:-80}" && ! compose ps --status running --services 2>/dev/null | grep -qx ministra; then
+        fail "Port ${saved:-80} is in use on this server (Mintrix or another web server?). Choose another one: sudo sh $0 --port 8080"
+    fi
+fi
 if [ "$fresh" = true ] && [ -z "$port" ]; then
     port=80
     port_in_use 80 && { echo "Port 80 is in use on this server (Mintrix or another web server?)."; port=8080; }

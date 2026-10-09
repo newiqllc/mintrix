@@ -62,6 +62,8 @@ while [ $# -gt 0 ]; do
 done
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
+# For the updater (mintrix-updater): which step this run is at, shown in Mintrix's progress
+step() { [ -z "${MINTRIX_STEP_FILE:-}" ] || printf '%s' "$1" > "$MINTRIX_STEP_FILE" 2>/dev/null || true; }
 fail() { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # Questions come from the terminal, so they also work when this script is piped into sh
@@ -110,9 +112,11 @@ compose() {
     fi
 }
 
-# Whether something on this server listens on TCP port $1 (unknown without ss: no)
+# Whether something on this server listens on TCP port $1: a program (ss), or a port a
+# Docker container publishes (often missing from ss: Docker forwards it with firewall rules)
 port_in_use() {
-    command -v ss >/dev/null 2>&1 && [ -n "$(ss -Hltn "sport = :$1" 2>/dev/null)" ]
+    { command -v ss >/dev/null 2>&1 && [ -n "$(ss -Hltn "sport = :$1" 2>/dev/null)" ]; } \
+        || docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -Eq ":$1->"
 }
 
 # ---------------------------------------------------------------- checks
@@ -347,6 +351,7 @@ fi
 
 # ---------------------------------------------------------------- images
 
+step download
 say "Downloading Mintrix $VERSION"
 # Pulled before anything changes: a wrong version stops here.
 # MINTRIX_SKIP_PULL=1 is only for testing images loaded on this machine.
@@ -368,6 +373,7 @@ else
 fi
 
 if compose ps --status running --services 2>/dev/null | grep -qx mysql; then
+    step backup
     backup="mysql_backups/$(date +%Y%m%d-%H%M%S)-before-$VERSION.sql"
     say "Backing up the database to $dir/$backup.gz"
     # Dumped to a file first: a failed dump stops the update before anything changes
@@ -383,12 +389,14 @@ fi
 
 set_env MINTRIX_VERSION "$VERSION"
 
+step start
 say "Starting Mintrix (the first start and database updates can take a few minutes)"
 compose up -d --remove-orphans --wait --wait-timeout 600 \
     || fail "Mintrix did not become ready. See: cd $dir && docker compose logs --tail=100 app"
 
 # The licensed features run only with the license file runtime/node.dat, issued for the
 # license key and the domain. Fetched now rather than by the hourly scheduler.
+step license
 say "Fetching the license file"
 if compose exec -T app setpriv --reuid=www-data --regid=www-data --init-groups php artisan mintrix:status --sync; then
     # The queue worker and scheduler may have started before the file was there
@@ -411,14 +419,68 @@ cat > /usr/local/bin/mintrix-update <<EOF
 #!/bin/sh
 # Updates Mintrix in $dir to the newest release: mintrix-update
 # or to a given version:                          mintrix-update --version 1.2.3
+# (with the installer of that version)
 set -eu
+url=https://github.com/$REPO/releases/latest/download/install.sh
+previous=
+for arg in "\$@"; do
+    [ "\$previous" != --version ] || url="https://github.com/$REPO/releases/download/v\$arg/install.sh"
+    previous=\$arg
+done
 tmp=\$(mktemp)
 trap 'rm -f "\$tmp"' EXIT
-url=https://github.com/$REPO/releases/latest/download/install.sh
 if command -v curl >/dev/null 2>&1; then curl -fsSL "\$url" -o "\$tmp"; else wget -qO "\$tmp" "\$url"; fi
 sh "\$tmp" --dir "$dir" "\$@"
 EOF
 chmod 755 /usr/local/bin/mintrix-update
+
+# ---------------------------------------------------------------- updates from the panel
+
+# Settings > System Update asks for an update by writing runtime/update/request.json; this
+# systemd path unit starts mintrix-updater (root) for it. The app itself never gets root.
+# agent.json tells the app the updater is here; without systemd the page shows the command.
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    mkdir -p "$dir/runtime/update"
+    # Writable by the app (www-data in the containers), like runtime/
+    chgrp "$(stat -c %g "$dir/runtime")" "$dir/runtime/update"
+    chmod 2775 "$dir/runtime/update"
+
+    # Written beside, then moved: a running updater keeps reading its own copy
+    cat > /usr/local/bin/mintrix-updater.new <<'MINTRIX_UPDATER_EOF'
+@@MINTRIX_UPDATER@@
+MINTRIX_UPDATER_EOF
+    chmod 755 /usr/local/bin/mintrix-updater.new
+    mv /usr/local/bin/mintrix-updater.new /usr/local/bin/mintrix-updater
+
+    cat > /etc/systemd/system/mintrix-updater.path <<EOF
+[Unit]
+Description=Mintrix updates asked for in Settings > System Update
+
+[Path]
+PathExists=$dir/runtime/update/request.json
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    cat > /etc/systemd/system/mintrix-updater.service <<EOF
+[Unit]
+Description=Mintrix update asked for in Settings > System Update
+
+[Service]
+Type=oneshot
+Environment=MINTRIX_DIR=$dir MINTRIX_REPO=$REPO
+ExecStart=/usr/local/bin/mintrix-updater
+TimeoutStartSec=3600
+EOF
+    systemctl daemon-reload
+    if systemctl enable --now mintrix-updater.path >/dev/null 2>&1; then
+        printf '{"installer": "%s"}\n' "$VERSION" > "$dir/runtime/update/agent.json"
+        chmod 644 "$dir/runtime/update/agent.json"
+    else
+        rm -f "$dir/runtime/update/agent.json"
+        echo "Note: updates from the panel could not be switched on (systemctl enable mintrix-updater.path failed); use mintrix-update."
+    fi
+fi
 
 # ---------------------------------------------------------------- done
 
@@ -431,7 +493,7 @@ Mintrix $VERSION is installed.
   Open:      ${url%/}/app/
   Sign in:   $sign_in
   Settings:  $dir/.env   (after a change, run: mintrix-update --version $VERSION)
-  Update:    mintrix-update
+  Update:    Settings > System Update in Mintrix, or: mintrix-update
 
 EOF
     cat <<EOF

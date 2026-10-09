@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds the installers, with the version, the repository, the license server and the
 # files they write filled in:
-#   dist/install.sh            Mintrix: src/install.sh with src/compose.yaml, src/env.example
+#   dist/install.sh            Mintrix: src/install.sh with src/compose.yaml, src/env.example,
+#                              src/mintrix-updater.sh
 #   dist/ministra-install.sh   Ministra: src/ministra-install.sh with src/ministra-compose.yaml,
 #                              src/ministra-env.example
 #
@@ -18,7 +19,7 @@ printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-
 cd "$(dirname "$0")"
 
 # The files go into quoted heredocs: their end markers must not appear in them
-for f in src/compose.yaml src/env.example src/ministra-compose.yaml src/ministra-env.example; do
+for f in src/compose.yaml src/env.example src/ministra-compose.yaml src/ministra-env.example src/mintrix-updater.sh; do
     ! grep -Eq '^(MINTRIX|MINISTRA)_.*_EOF$' "$f" || { echo "$f contains a heredoc end marker" >&2; exit 1; }
 done
 
@@ -28,6 +29,7 @@ for script in install.sh ministra-install.sh; do
         function embed(file,   line) { while ((getline line < file) > 0) print line; close(file) }
         $0 == "@@COMPOSE_YAML@@"          { embed("src/compose.yaml"); next }
         $0 == "@@ENV_EXAMPLE@@"           { embed("src/env.example");  next }
+        $0 == "@@MINTRIX_UPDATER@@"       { embed("src/mintrix-updater.sh"); next }
         $0 == "@@MINISTRA_COMPOSE_YAML@@" { embed("src/ministra-compose.yaml"); next }
         $0 == "@@MINISTRA_ENV_EXAMPLE@@"  { embed("src/ministra-env.example");  next }
         { gsub(/@@VERSION@@/, version); gsub(/@@REPO@@/, repo); gsub(/@@LICENSE_SERVER@@/, license_server); print }

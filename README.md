@@ -81,13 +81,20 @@ sudo mintrix-update --version 0.1.2      # a given version, also to go back
 
 An update backs up the database to `/opt/mintrix/mysql_backups/` first, keeps `.env`, and replaces `compose.yaml`. Going back to an older version does not undo its database changes: restore the backup taken before the update.
 
+### From the panel
+
+On servers with systemd, administrators can also update in Mintrix: **Settings > System Update > Update now** (or **Schedule**). The installer sets this up: Mintrix writes `/opt/mintrix/runtime/update/request.json`, and the `mintrix-updater.path` unit runs `/usr/local/bin/mintrix-updater` as root, which runs the same update and reports its progress to the page. Mintrix itself never gets root. If the new version does not start, the updater restores the previous version and the database backup taken just before.
+
+Installations from before this feature get it with one `sudo mintrix-update`. Check it with `systemctl status mintrix-updater.path`; the log of the last update is `/opt/mintrix/runtime/update/update.log`.
+
 ## Reinstall
 
 To start again from scratch. **This deletes the database and all data of the installation**; keep a backup from `/opt/mintrix/mysql_backups/` if you may need it.
 
 ```sh
 cd /opt/mintrix && sudo docker compose down -v --remove-orphans
-sudo rm -rf /opt/mintrix /usr/local/bin/mintrix-update
+sudo systemctl disable --now mintrix-updater.path 2>/dev/null
+sudo rm -rf /opt/mintrix /usr/local/bin/mintrix-update /usr/local/bin/mintrix-updater /etc/systemd/system/mintrix-updater.*
 ```
 
 Then install as above. Without removing `/opt/mintrix`, the script finds its `.env` and updates instead.

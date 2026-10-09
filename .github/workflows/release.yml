@@ -42,7 +42,7 @@ jobs:
 
       - name: Check
         run: |
-          shellcheck -s sh build.sh dist/install.sh dist/ministra-install.sh
+          shellcheck -s sh build.sh dist/install.sh dist/ministra-install.sh src/mintrix-updater.sh
           sh dist/install.sh --help >/dev/null
           sh dist/ministra-install.sh --help >/dev/null
           # The Compose file the installer writes is valid with the settings it fills in
