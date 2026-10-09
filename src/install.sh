@@ -12,8 +12,7 @@ set -eu
 
 VERSION="@@VERSION@@"
 REPO="@@REPO@@"
-# Checks the license key and gives the registry login for the images
-LICENSE_SERVER="${MINTRIX_LICENSE_SERVER:-https://license.newiq.pl}"
+LICENSE_SERVER="@@LICENSE_SERVER@@"
 
 dir=/opt/mintrix
 domain=
@@ -170,13 +169,6 @@ if [ -f "$dir/.env" ]; then
     fresh=false
     previous=$(get_env MINTRIX_VERSION)
     say "Updating Mintrix in $dir${previous:+ from $previous} to $VERSION (settings in .env are kept)"
-    # The images moved from the momodeluxe to the newiqllc registry: new versions are only there
-    for key in MINTRIX_IMAGE MINTRIX_WEB_IMAGE; do
-        image=$(get_env "$key")
-        case "$image" in
-            ghcr.io/momodeluxe/*) set_env "$key" "ghcr.io/newiqllc/${image#ghcr.io/momodeluxe/}" ;;
-        esac
-    done
 else
     fresh=true
     previous=
@@ -217,8 +209,9 @@ license_login() {
     answer=$(mktemp)
     url="${LICENSE_SERVER%/}/registry.php"
     # Over IPv4: the license is bound to this server's IPv4 address
+    status=
     if command -v curl >/dev/null 2>&1; then
-        curl -4 -sS --max-time 30 -o "$answer" --data "licensekey=$key&domain=$2" "$url" || true
+        status=$(curl -4 -sS --max-time 30 -o "$answer" -w '%{http_code}' --data "licensekey=$key&domain=$2" "$url") || status=
     else
         wget -4 -q --content-on-error -T 30 -O "$answer" --post-data "licensekey=$key&domain=$2" "$url" || true
     fi
@@ -226,10 +219,18 @@ license_login() {
     user=$(json_field user "$answer")
     token=$(json_field token "$answer")
     error=$(json_field error "$answer")
+    [ -s "$answer" ] || status=000
     rm -f "$answer"
 
     [ -n "$registry" ] && [ -n "$user" ] && [ -n "$token" ] && return 0
-    echo "License not accepted for $2: ${error:-the license server could not be reached ($LICENSE_SERVER)}"
+    if [ -z "$error" ]; then
+        case "$status" in
+            429) error="too many attempts from this server; wait a minute and try again" ;;
+            000) error="the license server could not be reached ($LICENSE_SERVER)" ;;
+            *) error="the license server could not answer${status:+ (HTTP $status)}; try again later" ;;
+        esac
+    fi
+    echo "License not accepted for $2: $error"
     return 1
 }
 
@@ -302,20 +303,30 @@ else
     fi
 fi
 
-# A changed port must be free (the one Mintrix already uses is)
-for setting in "MINTRIX_HTTP_PORT:$port" "MINTRIX_HTTPS_PORT:$https_port"; do
+# A chosen port must be free, unless it is the one this installation's running nginx
+# already listens on
+mintrix_holds() {
+    current=$(get_env "$1")
+    [ "$2" = "${current:-$3}" ] && compose ps --status running --services 2>/dev/null | grep -qx nginx
+}
+for setting in "MINTRIX_HTTP_PORT:80:$port" "MINTRIX_HTTPS_PORT:443:$https_port"; do
     key=${setting%%:*}
-    value=${setting#*:}
+    rest=${setting#*:}
+    default=${rest%%:*}
+    value=${rest#*:}
     [ -n "$value" ] || continue
     case "$value" in
-        ""|*[!0-9]*) fail "Not a port: $value" ;;
+        *[!0-9]*) fail "Not a port: $value" ;;
     esac
-    if [ "$value" != "$(get_env "$key")" ] && port_in_use "$value"; then
+    [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "Not a port: $value"
+    if port_in_use "$value" && ! mintrix_holds "$key" "$value" "$default"; then
         fail "Port $value is in use on this server: stop what listens there, or choose another port."
     fi
-    set_env "$key" "$value"
 done
 [ "$port" != "$https_port" ] || [ -z "$port" ] || fail "HTTP and HTTPS need different ports."
+# Saved only once both are checked
+[ -z "$port" ] || set_env MINTRIX_HTTP_PORT "$port"
+[ -z "$https_port" ] || set_env MINTRIX_HTTPS_PORT "$https_port"
 case "$cloudflare" in
     y|Y|yes|Yes) set_env MINTRIX_TRUSTED_PROXIES cloudflare ;;
 esac
@@ -355,11 +366,17 @@ else
 fi
 
 if compose ps --status running --services 2>/dev/null | grep -qx mysql; then
-    backup="mysql_backups/$(date +%Y%m%d-%H%M%S)-before-$VERSION.sql.gz"
-    say "Backing up the database to $dir/$backup"
+    backup="mysql_backups/$(date +%Y%m%d-%H%M%S)-before-$VERSION.sql"
+    say "Backing up the database to $dir/$backup.gz"
+    # Dumped to a file first: a failed dump stops the update before anything changes
     # shellcheck disable=SC2016  # expanded inside the MySQL container
-    compose exec -T mysql sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers "$MYSQL_DATABASE"' 2>/dev/null \
-        | gzip > "$dir/$backup"
+    if ! compose exec -T mysql sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers "$MYSQL_DATABASE"' \
+        > "$dir/$backup" 2>"$dir/$backup.log"; then
+        rm -f "$dir/$backup"
+        fail "The database backup failed, so nothing was changed: $(grep -v -i 'using a password' "$dir/$backup.log" | tail -n 1)"
+    fi
+    rm -f "$dir/$backup.log"
+    gzip "$dir/$backup"
 fi
 
 set_env MINTRIX_VERSION "$VERSION"
