@@ -415,7 +415,9 @@ fi
 
 # ---------------------------------------------------------------- mintrix-update
 
-cat > /usr/local/bin/mintrix-update <<EOF
+# Written beside, then moved: mintrix-update itself runs this script, and the shell keeps
+# reading its file after this run; rewriting it in place broke that ("Unterminated quoted string")
+cat > /usr/local/bin/mintrix-update.new <<EOF
 #!/bin/sh
 # Updates Mintrix in $dir to the newest release: mintrix-update
 # or to a given version:                          mintrix-update --version 1.2.3
@@ -432,7 +434,8 @@ trap 'rm -f "\$tmp"' EXIT
 if command -v curl >/dev/null 2>&1; then curl -fsSL "\$url" -o "\$tmp"; else wget -qO "\$tmp" "\$url"; fi
 sh "\$tmp" --dir "$dir" "\$@"
 EOF
-chmod 755 /usr/local/bin/mintrix-update
+chmod 755 /usr/local/bin/mintrix-update.new
+mv /usr/local/bin/mintrix-update.new /usr/local/bin/mintrix-update
 
 # ---------------------------------------------------------------- updates from the panel
 

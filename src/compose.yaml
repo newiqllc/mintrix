@@ -35,6 +35,9 @@ x-mintrix: &mintrix
     MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Mintrix}
     IP_WHITELIST: ${IP_WHITELIST:-}
     MINTRIX_LICENSE_KEY: ${MINTRIX_LICENSE_KEY:-}
+    # Set-top box portal: empty = Ministra's address from Settings > Ministra; off; or
+    # another address for box traffic
+    MINTRIX_PORTAL_UPSTREAM: ${MINTRIX_PORTAL_UPSTREAM:-}
     # nginx below talks to the app; client addresses reach Laravel through it
     TRUSTED_PROXIES: nginx
   volumes:
@@ -60,6 +63,9 @@ services:
       MINTRIX_HTTPS_PORT: ${MINTRIX_HTTPS_PORT:-443}
       MINTRIX_HTTPS_REDIRECT: ${MINTRIX_HTTPS_REDIRECT:-off}
       MINTRIX_TRUSTED_PROXIES: ${MINTRIX_TRUSTED_PROXIES:-}
+    # Box portal: host.docker.internal = this server, for a Ministra installed next to Mintrix
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # The ports on this server, from .env: after changing them, run docker compose up -d.
     # BIND empty = every address of the server (IPv4 and IPv6); 127.0.0.1 = only this
     # machine; one of the server's addresses = only that one ([...] around an IPv6 one).
@@ -71,6 +77,8 @@ services:
       - ./certs:/etc/nginx/certs:ro
       # Your own nginx additions (*.conf, inside the server block), kept across updates
       - ./nginx:/etc/nginx/mintrix/custom:ro
+      # The box portal's nginx config, written by the app from Settings > Ministra
+      - ./runtime/portal:/etc/nginx/mintrix/portal-runtime:ro
     depends_on:
       app:
         condition: service_healthy

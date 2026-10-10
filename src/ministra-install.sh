@@ -417,7 +417,9 @@ compose up -d --remove-orphans --wait --wait-timeout 900 \
 
 # ---------------------------------------------------------------- ministra-update
 
-cat > /usr/local/bin/ministra-update <<EOF
+# Written beside, then moved: ministra-update itself runs this script, and the shell keeps
+# reading its file after this run; rewriting it in place broke that ("Unterminated quoted string")
+cat > /usr/local/bin/ministra-update.new <<EOF
 #!/bin/sh
 # Updates Ministra in $dir to the version your Mintrix names: ministra-update
 # or to a given version:                                       ministra-update --version 1.2.3
@@ -428,7 +430,8 @@ url=https://github.com/$REPO/releases/latest/download/ministra-install.sh
 if command -v curl >/dev/null 2>&1; then curl -fsSL "\$url" -o "\$tmp"; else wget -qO "\$tmp" "\$url"; fi
 sh "\$tmp" --dir "$dir" "\$@"
 EOF
-chmod 755 /usr/local/bin/ministra-update
+chmod 755 /usr/local/bin/ministra-update.new
+mv /usr/local/bin/ministra-update.new /usr/local/bin/ministra-update
 
 # ---------------------------------------------------------------- done
 
