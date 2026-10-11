@@ -365,7 +365,7 @@ else
     trap 'rm -rf "$DOCKER_CONFIG"' EXIT
     printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin >"$DOCKER_CONFIG/login.log" 2>&1 \
         || fail "$registry refused the login from the license server: $(tail -n 1 "$DOCKER_CONFIG/login.log")"
-    MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql \
+    MINTRIX_VERSION="$VERSION" compose pull --quiet nginx app mysql redis \
         || fail "Could not download Mintrix $VERSION. Check the version: https://github.com/$REPO/releases"
     rm -rf "$DOCKER_CONFIG"
     unset DOCKER_CONFIG

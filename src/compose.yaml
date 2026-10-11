@@ -22,7 +22,12 @@ x-mintrix: &mintrix
     DB_USERNAME: ${DB_USERNAME:-mintrix}
     DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
     SESSION_DRIVER: database
-    CACHE_STORE: database
+    # Redis: the rate limiter and locks need atomic counters (the database store deadlocks
+    # under parallel requests)
+    CACHE_STORE: redis
+    REDIS_CLIENT: phpredis
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
     QUEUE_CONNECTION: database
     FILESYSTEM_DISK: local
     MAIL_MAILER: ${MAIL_MAILER:-smtp}
@@ -90,6 +95,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/mintrix-ready"]
       interval: 5s
@@ -131,6 +138,21 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # The cache: no host port, only reachable from the other containers. Saved to disk
+  # (appendonly), so values kept forever survive a restart
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   mysql_data:
+  redis_data:
   storage:
