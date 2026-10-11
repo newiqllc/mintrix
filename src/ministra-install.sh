@@ -60,6 +60,9 @@ done
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# For the updater (ministra-updater): which step this run is at, reported to Mintrix
+step() { [ -z "${MINISTRA_STEP_FILE:-}" ] || printf '%s' "$1" > "$MINISTRA_STEP_FILE" 2>/dev/null || true; }
+
 # Questions come from the terminal, so they also work when this script is piped into sh
 interactive() { [ "$assume_yes" = false ] && [ -r /dev/tty ] && [ -w /dev/tty ] && { : </dev/tty; } 2>/dev/null; }
 
@@ -370,6 +373,7 @@ fi
 
 # ---------------------------------------------------------------- images
 
+step download
 say "Downloading Ministra $version"
 # Pulled before anything changes: a wrong version stops here.
 # MINISTRA_SKIP_PULL=1 is only for testing images loaded on this machine.
@@ -391,6 +395,7 @@ else
 fi
 token=
 
+step backup
 if compose ps --status running --services 2>/dev/null | grep -qx mysql; then
     backup="mysql_backups/$(date +%Y%m%d-%H%M%S)-before-$version.sql"
     say "Backing up the database to $dir/$backup.gz"
@@ -406,6 +411,7 @@ if compose ps --status running --services 2>/dev/null | grep -qx mysql; then
 fi
 
 set_env MINISTRA_VERSION "$version"
+step start
 
 if [ "$fresh" = true ]; then
     say "Starting Ministra (the first start creates the database, which takes a few minutes)"
@@ -432,6 +438,48 @@ sh "\$tmp" --dir "$dir" "\$@"
 EOF
 chmod 755 /usr/local/bin/ministra-update.new
 mv /usr/local/bin/ministra-update.new /usr/local/bin/ministra-update
+
+# ---------------------------------------------------------------- updates from Mintrix
+
+# Settings > Ministra > Update in Mintrix: this timer starts ministra-updater (root) every
+# minute; it checks in with Mintrix and runs an update that is waiting there. Mintrix never
+# reaches this server: the updater asks. Without systemd, updates stay manual (ministra-update).
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    mkdir -p "$dir/update"
+    # Written beside, then moved: a running updater keeps reading its own copy
+    cat > /usr/local/bin/ministra-updater.new <<'MINISTRA_UPDATER_EOF'
+@@MINISTRA_UPDATER@@
+MINISTRA_UPDATER_EOF
+    chmod 755 /usr/local/bin/ministra-updater.new
+    mv /usr/local/bin/ministra-updater.new /usr/local/bin/ministra-updater
+
+    cat > /etc/systemd/system/ministra-updater.service <<EOF
+[Unit]
+Description=Ministra updates asked for in Mintrix (Settings > Ministra)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+Environment=MINISTRA_DIR=$dir MINISTRA_INSTALLER_VERSION=$INSTALLER_VERSION
+ExecStart=/usr/local/bin/ministra-updater
+TimeoutStartSec=3600
+EOF
+    cat > /etc/systemd/system/ministra-updater.timer <<EOF
+[Unit]
+Description=Check Mintrix for Ministra updates every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now ministra-updater.timer >/dev/null 2>&1 \
+        || echo "Note: updates from Mintrix could not be switched on (systemctl enable ministra-updater.timer failed); use ministra-update."
+fi
 
 # ---------------------------------------------------------------- done
 
