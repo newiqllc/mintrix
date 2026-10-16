@@ -1,23 +1,112 @@
-TODO: REPLACE THIS FILE WITH YOUR LICENCE TERMS BEFORE PUBLISHING.
-It is a placeholder outline, not legal text; have the final wording reviewed.
+Mintrix Software License
 
-Copyright (c) 2026 Mohamed El Mahdy. All rights reserved.
+Copyright (c) 2026 NewIQ LLC. All rights reserved.
 
-Mintrix (the "Software"), distributed as the Docker images this repository
-installs, is proprietary.
+This license covers Mintrix, the software NewIQ LLC ("NewIQ", "we") distributes as the
+Docker images, license files and updates that the installers in this repository download
+(the "Software"), and the files in this repository itself (the "Installer Files": the
+install and update scripts, compose and environment templates, build scripts and
+documentation).
 
-Points your terms should cover:
-- Who may install and use the Software, and on how many servers
-- That copying, redistributing, decoding, decompiling or reverse engineering
-  the Software is not permitted
-- Whether a licence key or licence file is required, and what happens when
-  it expires
-- Warranty disclaimer and limitation of liability
-- Governing law
+By installing, running or using the Software you ("Customer") accept these terms and the
+Terms of Service at https://cms.newiq.pl/terms. Where the two differ, the Terms of Service
+and your order prevail.
 
-Third-party software in the images, under their own licences:
-Debian, PHP, nginx, MySQL, Laravel and the bundled Composer packages, Vue and
-the bundled npm packages.
 
-The files in this repository (compose.yaml, .env.example, scripts/, README.md)
-may be used and modified to install and run the Software.
+1. License to the Software
+
+1.1 NewIQ grants Customer a limited, non-exclusive, non-transferable, non-sublicensable
+    license to install and use the Software, in object form only, for Customer's own
+    business, while Customer holds an active Mintrix license purchased from NewIQ or an
+    authorized reseller.
+
+1.2 Each license may be used for one installation, on the domain it is issued for, within
+    the device limits and features of the plan and add-ons ordered. Use beyond them
+    requires a further license or an upgrade.
+
+1.3 The Software checks its license with NewIQ's license server and needs a valid license
+    key and license file to run. When the license expires, is suspended or is cancelled,
+    the right to use the Software ends and the Software may stop working, apart from any
+    grace period NewIQ allows.
+
+1.4 Updates NewIQ makes available during the license term are covered by this license.
+
+
+2. Restrictions
+
+Customer may not, and may not allow others to:
+
+  a) copy, distribute, sell, rent, lease, lend or sublicense the Software, or offer it to
+     third parties as a hosted service, except as expressly allowed in the order;
+  b) decode, decrypt, decompile, disassemble or reverse engineer the Software, or try to
+     derive its source code, except where applicable law expressly permits it despite
+     this restriction;
+  c) modify the Software or create derivative works of it;
+  d) remove, bypass or interfere with the license check, license files, encoding or any
+     other protection of the Software, or share license keys or license files;
+  e) remove or alter copyright, trademark or other notices in the Software.
+
+
+3. Installer Files
+
+The Installer Files may be used, copied and modified free of charge, but only to install,
+run, update, back up and remove the Software under a valid license. They give no right to
+the Software itself.
+
+
+4. Third-party software
+
+The Software and the images include third-party components (among them Debian, PHP,
+nginx, MySQL, Redis, Laravel, React and their packages). Ministra, Flussonic and other
+third-party products that Mintrix installs or connects to are not part of the Software.
+All of these remain under their own licenses and terms, which take precedence for those
+components.
+
+
+5. Ownership
+
+The Software is licensed, not sold. NewIQ and its licensors keep all rights, title and
+interest in it, including all intellectual property rights. Mintrix and NewIQ are trade
+names of NewIQ LLC; no right to use them is granted except to refer to the Software.
+
+
+6. Customer data
+
+Customer is responsible for the data it manages with the Software, for backups of its
+installation and for its own compliance with applicable law, including data protection
+law towards its subscribers.
+
+
+7. No warranty
+
+To the extent permitted by law, the Software and the Installer Files are provided "as
+is", without warranty of any kind, express or implied, including fitness for a particular
+purpose and non-infringement. NewIQ does not warrant that the Software will run without
+interruption or errors.
+
+
+8. Limitation of liability
+
+To the extent permitted by law, NewIQ is not liable for indirect or consequential damage,
+lost profits, lost revenue, lost data or business interruption, and NewIQ's total
+liability under this license is limited to the fees Customer paid for the license in the
+twelve months before the event giving rise to the claim. Nothing in this license limits
+liability for intent or gross negligence, or any liability that cannot be limited by law.
+
+
+9. Termination
+
+This license ends automatically if Customer breaches it or the Mintrix license ends.
+Customer must then stop using the Software and remove it. Sections 2, 5, 7, 8 and 10
+survive termination.
+
+
+10. Governing law
+
+This license is governed by the laws of the Republic of Poland, without regard to its
+conflict-of-law rules; the United Nations Convention on Contracts for the International
+Sale of Goods does not apply. The courts competent for NewIQ's registered seat have
+exclusive jurisdiction, unless mandatory law gives Customer another forum.
+
+
+Questions about this license: contact NewIQ through https://cms.newiq.pl.
