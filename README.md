@@ -174,3 +174,7 @@ sh build.sh 0.1.0
 
 To test an installer against images loaded on the machine instead of downloaded, set `MINTRIX_SKIP_PULL=1` (Ministra: `MINISTRA_SKIP_PULL=1`).
 
+
+## License
+
+Mintrix is proprietary software by NewIQ LLC and needs an active license; see [LICENSE](LICENSE) and the [Terms of Service](https://cms.newiq.pl/terms). The files in this repository may be used and modified to install and run Mintrix under a valid license. Ministra, Flussonic and other third-party software keep their own licenses.
