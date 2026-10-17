@@ -371,6 +371,14 @@ else
     same_server=false
 fi
 
+# Mintrix on this server reaches the portal over its network, and boxes and Ministra's admin
+# go through Mintrix (Settings > Ministra > Open Ministra admin): the port only needs to
+# answer on this machine. New installations start that way; an existing one keeps its
+# setting and is told at the end how to close it.
+if [ "$same_server" = true ] && [ "$fresh" = true ] && [ -z "$(get_env MINISTRA_HTTP_BIND)" ]; then
+    set_env MINISTRA_HTTP_BIND 127.0.0.1
+fi
+
 # ---------------------------------------------------------------- images
 
 step download
@@ -493,14 +501,22 @@ if [ "$same_server" = true ]; then
 else
     mintrix_side="$portal"
 fi
+# Only on this machine: boxes and the admin go through Mintrix
+if [ "$(get_env MINISTRA_HTTP_BIND)" = 127.0.0.1 ]; then
+    box_portal="$mintrix_url/stalker_portal/c/   (through Mintrix)"
+    admin_url="Mintrix > Settings > Ministra > Open Ministra admin"
+else
+    box_portal="$portal/c/"
+    admin_url="$portal/server/adm/"
+fi
 
 if [ "$fresh" = true ]; then
     cat <<EOF
 
 Ministra $version is installed.
 
-  Portal:    $portal/c/        (for set-top boxes)
-  Admin:     $portal/server/adm/
+  Portal:    $box_portal   (for set-top boxes)
+  Admin:     $admin_url
   Settings:  $dir/.env   (after a change, run: ministra-update --version $version)
   Update:    ministra-update
 
@@ -514,4 +530,17 @@ EOF
 else
     echo
     echo "Ministra $version is running${previous:+ (was $previous)}."
+fi
+
+# Open to the internet while Mintrix could serve everything: say how to close it
+if [ "$same_server" = true ] && [ -z "$(get_env MINISTRA_HTTP_BIND)" ]; then
+    cat <<EOF
+
+Note: Ministra's port $http_port is open to the internet. With Mintrix on this server, boxes
+and Ministra's admin can go through Mintrix instead:
+  1. In Mintrix > Settings > Ministra, set the address to http://ministra:88/stalker_portal
+  2. Point the boxes at Mintrix's address (old portal addresses: Settings > Ministra > Box portal)
+  3. Set MINISTRA_HTTP_BIND=127.0.0.1 in $dir/.env and run: ministra-update --version $version
+Ministra's admin then opens from Mintrix > Settings > Ministra > Open Ministra admin.
+EOF
 fi

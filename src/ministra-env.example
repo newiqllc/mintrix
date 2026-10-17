@@ -29,7 +29,8 @@ MYSQL_ROOT_PASSWORD=
 MINISTRA_HTTP_PORT=80
 # Where the port is reachable from:
 #   (empty)       every address of this server: open to the network
-#   127.0.0.1     this machine only: for your own proxy in front
+#   127.0.0.1     this machine only: Mintrix on this server (boxes and the admin go through
+#                 it; new installations next to Mintrix start this way) or your own proxy
 MINISTRA_HTTP_BIND=
 
 # off: the portal starts without running the database migrations
